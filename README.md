@@ -8,6 +8,8 @@ An item advisor for Deadlock: it recommends what to buy next for your hero, your
 - Uses public statistics and live match data from [deadlock-api.com](https://deadlock-api.com).
 - The web version is always the latest release. A downloaded copy shows a red dot when a newer version is out.
 
+**Feedback and ideas:** use the Feedback link at the top of the advisor, or [open a feedback report](https://github.com/vMoppy/deadlock-advisor/issues/new?template=feedback.yml).
+
 Made by Moppy. Not affiliated with Valve.
 
 This repository only holds the published page (`site/`). Development happens elsewhere; changes here are overwritten by the next release.

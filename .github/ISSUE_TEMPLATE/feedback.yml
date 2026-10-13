@@ -1,0 +1,42 @@
+name: Feedback
+description: Report a problem with the advisor or a recommendation, or suggest an idea.
+title: "[Feedback] "
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the Deadlock Item Advisor. Reports here are **public**: please don't include personal details.
+        The easiest way to fill this in is the **Feedback** button at the top of the advisor, which fills in most of it for you.
+  - type: dropdown
+    id: area
+    attributes:
+      label: It's about
+      options:
+        - A recommendation
+        - The live match link
+        - The layout or wording
+        - An idea
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What happened, or what you'd like
+      description: For a recommendation, say which item and roughly when in the match (game time).
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Details from the advisor (optional)
+      description: Filled in by the advisor's Feedback button (version, hero, game time, buy order). No names or accounts.
+  - type: textarea
+    id: record
+    attributes:
+      label: Match record (optional)
+      description: |
+        In the advisor: Setup → Match records → Save records to a file, then drag the file here.
+        If GitHub won't accept a .json file, rename it to end in .txt.
+        A record holds the match number, the heroes and items in it, and the advisor's suggestions. It has no names or Steam accounts, but anyone can look up a match by its number.
