@@ -1,0 +1,36 @@
+# Publishes site/ as the web version: https://vmoppy.github.io/deadlock-advisor/
+# Only released versions are copied here (from the private development repository, after its checks and release).
+name: Publish the web version
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    name: Publish
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Make sure the page and its version file match
+        run: |
+          test -s site/index.html || { echo "::error::site/index.html is missing"; exit 1; }
+          v=$(grep -o 'const VERSION = "[^"]*"' site/index.html | cut -d'"' -f2)
+          [ -n "$v" ] || { echo "::error::No version inside site/index.html"; exit 1; }
+          grep -q "\"version\": *\"$v\"" site/version.json || { echo "::error::site/version.json doesn't say $v"; exit 1; }
+          echo "Publishing $v"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
