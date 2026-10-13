@@ -43,6 +43,7 @@
   #summary { flex: 1 1 240px; min-width: 0; font-weight: 600; }
   .ok-text { color: var(--good); } .warn-text { color: var(--warn); font-weight: 600; }
   .updnote { display: inline-flex; gap: 6px; align-items: center; }
+  .statpick select { max-width: 100%; }
   .updnote .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--muted); }
   .updnote.ok .dot { background: var(--good); } .updnote.new .dot { background: var(--bad); }
   .updnote.new { color: var(--bad); font-weight: 600; }
@@ -272,7 +273,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.7.3</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.7.4</span>
     <span class="small updnote" id="updNote" hidden></span>
   </div>
 
@@ -299,6 +300,13 @@
         <button id="steamChange" class="btn tiny" type="button">Change</button>
       </div>
       <div id="steamResults"></div>
+      <div class="rowflex statpick">
+        <label for="liveRank" class="small">Statistics from</label>
+        <select id="liveRank" aria-describedby="liveStatNote"></select>
+        <label for="liveWindow" class="small">Matches from</label>
+        <select id="liveWindow" aria-describedby="liveStatNote"></select>
+      </div>
+      <p class="muted small" id="liveStatNote"></p>
       <div class="rowflex">
         <button id="findMatch" class="btn main big" type="button">Find my match</button>
         <label class="check small"><input type="checkbox" id="watchNext"> Keep looking for my next match</label>
@@ -443,7 +451,7 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.7.3";   // shown in the top bar and written into match records
+const VERSION = "v2.7.4";   // shown in the top bar and written into match records
 const PHASES = { lane: [0, 540], mid: [540, 1200], late: [1200, null] };
 const PHASE_NAMES = { lane: "Laning", mid: "Mid game", late: "Late game" };
 const BOUNDARIES = [[540, "lane", "mid"], [1200, "mid", "late"]];
@@ -567,7 +575,7 @@ function newerVersion(a, b) {
 }
 /* Settings carried from a downloaded copy to the web version (in the address after "#", which never leaves your
    computer): your Steam account and rank, hero, preferences and per-hero "always skip" choices. Not match records. */
-const CARRY_KEYS = ["steam", "myRank", "rank", "me", "watch", "logOn", "logAuto", "skipAlways", "skipCounts", "spectates"];
+const CARRY_KEYS = ["steam", "myRank", "rank", "window", "me", "watch", "logOn", "logAuto", "skipAlways", "skipCounts", "spectates"];
 function packSettings(get) {
   const o = {}; for (const k of CARRY_KEYS) { const v = get(k); if (v != null) o[k] = v; }
   const bytes = new TextEncoder().encode(JSON.stringify(o));
@@ -1739,6 +1747,13 @@ function rankChoice() {
     label: `${lob ? `lobbies like this one (average ${rankName(c)})` : `lobbies around your rank (${rankName(c)})`}: ${rangeLabel(lo, hi)}${note}` };
 }
 function rankBounds() { const c = rankChoice(); return [c.lo, c.hi]; }
+/* The data period: your last choice if it's available (the patch option needs the patch list), otherwise the default
+   (since the latest patch, or the last 30 days when the patch is under a week old). */
+function windowDefault() {
+  const saved = store.get("window");
+  const opt = [...$("window").options].find(o => o.value === saved && !o.disabled);
+  return opt ? saved : S.defaultWindow;
+}
 function renderRankNote() {
   const c = rankChoice(), lob = LIVE.lobby;
   const t = {
@@ -1749,6 +1764,24 @@ function renderRankNote() {
     tier: `Statistics from matches where the lobby averaged ${c.label.replace(/ lobbies.*/, "")}${S.rankWiden ? `, widened to ${rangeLabel(c.lo, c.hi)} because there were few games at that rank` : ""}.`
   }[c.src];
   $("rankNote").textContent = t + (S.ranksSource === "fallback" ? " (Rank names couldn't be loaded, so tiers are numbered.)" : "");
+  syncStatControls();
+}
+/* The same two choices on the live match card (v2.7.4), mirroring the ones in Manual setup: one setting, two places.
+   The note says what's actually used, including the rank found automatically. */
+function syncStatControls() {
+  for (const [mirror, orig] of [["liveRank", "rankRange"], ["liveWindow", "window"]]) {
+    const m = $(mirror), o = $(orig); if (!m || !o) continue;
+    const sig = [...o.options].map(x => x.value + (x.disabled ? "!" : "") + x.textContent).join("|");
+    if (m.dataset.sig !== sig) {
+      m.replaceChildren(...[...o.options].map(x => { const c = document.createElement("option"); c.value = x.value; c.textContent = x.textContent; c.disabled = x.disabled; return c; }));
+      m.dataset.sig = sig;
+    }
+    m.value = o.value;
+  }
+  const c = rankChoice(), win = timeWindow();
+  const note = $("liveStatNote");
+  if (note) note.textContent = `Using ${c.label}, ${win.label}.`
+    + (c.src === "none" ? " The rank narrows once your Steam account or the match's lobby is known." : "");
 }
 /* Something changed what the bracket should be: start narrow again and refetch what depends on it. */
 function rankChanged() {
@@ -2235,31 +2268,28 @@ function schemaSummary(tables, cols) {
 }
 /* SQL for the two streams. Tables unquoted, columns quoted; the Steam ID is sent as text because
    64-bit IDs lose digits as JavaScript numbers. */
-/* The player rows arrive for every player on every game tick (64 a second; about 350 MB a match in two records).
-   Asking only for every 16th tick (4 a second) carries the same information, a quarter of a second later at most,
-   with about a sixteenth of the data: each row holds a player's whole current state, not a change. If the service
-   doesn't accept the filter, the full stream is used (see connect). */
+/* The player rows: one for every player on every game tick (64 a second).
+   - No filter (no WHERE). The live service holds back filtered results until it has about 8,000 rows to send
+     (DataFusion coalesces filtered batches), so v2.7 to v2.7.3's "every 16th tick" filter made the first rows take
+     about 3.5 minutes instead of about 1, and later updates arrive in bursts every ~3 minutes (all three v2.7
+     records). Unfiltered, rows come as the service reads the broadcast.
+   - Less data another way: values are only filled in on some ticks (CASE ... END) and the service leaves empty values
+     out of each row. The small ones (hero, team, net worth, lane, alive, respawn) on every 4th tick (16 times a
+     second), the bulky ones (the item list, Steam ID, entity numbers) on every 16th (4 times a second); other rows are
+     just the tick number, which the tool skips. If the service refuses CASE, the plain request is used (v2.6.3's
+     data use). */
+const OFTEN_TICKS = 4;
 const THIN_TICKS = 16;
-const THIN_FIRST_ROWS_MS = 100000;
 const waitText = since => { const s = Math.round((Date.now() - since) / 1000);
   return s < 30 ? "Waiting for the broadcast to start. This can take up to a minute."
     : `Waiting for Valve's broadcast of your match (${mmss(s)} so far). It usually starts sending within 1 to 3 minutes of the match beginning; the tool connects by itself.`; };
 function startRosterStream() {
-  const thin = !LIVE.thinRejected && !!LIVE.cols?.tick;
-  LIVE.thin = thin; tlMark("stream started");
-  const stream = LIVE.streams.roster = liveStream("roster", rosterSql(LIVE.cols, thin), onRosterRow, thin ? detail => {
-    // The service didn't accept the every-16th-tick filter: use the full stream (as up to v2.6.3).
+  const light = !LIVE.thinRejected && !!LIVE.cols?.tick;
+  LIVE.thin = light; tlMark("stream started");
+  const stream = LIVE.streams.roster = liveStream("roster", rosterSql(LIVE.cols, light), onRosterRow, light ? detail => {
+    // The service didn't accept the lighter request: use the plain one.
     LIVE.thinRejected = String(detail).slice(0, 160); LIVE.thin = false; delete LIVE.streams.roster; startRosterStream();
   } : undefined);
-  /* In one recorded match the first rows took 2.5 minutes with no "broadcast not ready" messages (usually about a
-     minute, with them). In case the filter is what held it up: no rows and no messages after 100 s, the full
-     stream is tried instead. (With "not ready" messages, the wait is the broadcast's, and switching wouldn't help.) */
-  if (thin) setTimeout(() => {
-    const info = LIVE.streamInfo?.roster;
-    if (LIVE.streams.roster !== stream || !info || info.rows || info.status) return;
-    stream.stop(); delete LIVE.streams.roster;
-    LIVE.thinRejected = "no rows or messages within 100 s"; LIVE.thin = false; startRosterStream();
-  }, LIVE.thinWaitMs || THIN_FIRST_ROWS_MS);   // thinWaitMs: shorter in tests
   // While waiting, say how long it's been, so a slow start doesn't look stuck.
   const started = Date.now();
   const tick = () => {
@@ -2270,18 +2300,20 @@ function startRosterStream() {
   };
   setTimeout(tick, 30000);
 }
-function rosterSql(c, thin = true) {
-  const sel = [`${qcol(c.hero)} AS hero`, `${qcol(c.team)} AS team`];
-  if (c.nw) sel.push(`${qcol(c.nw)} AS nw`);
-  if (c.lane) sel.push(`${qcol(c.lane)} AS lane`);
-  if (c.steam) sel.push(`CAST(${qcol(c.steam)} AS VARCHAR) AS steam`);
-  if (c.items) sel.push(`${qcol(c.items)} AS items`);
+function rosterSql(c, light = true) {
+  const on = n => expr => light && c.tick ? `CASE WHEN ${qcol(c.tick)} % ${n} = 0 THEN ${expr} END` : expr;
+  const every = on(THIN_TICKS), often = on(OFTEN_TICKS);
+  const sel = [`${often(qcol(c.hero))} AS hero`, `${often(qcol(c.team))} AS team`];
+  if (c.nw) sel.push(`${often(qcol(c.nw))} AS nw`);
+  if (c.lane) sel.push(`${often(qcol(c.lane))} AS lane`);
+  if (c.steam) sel.push(`${every(`CAST(${qcol(c.steam)} AS VARCHAR)`)} AS steam`);
+  if (c.items) sel.push(`${every(qcol(c.items))} AS items`);
   if (c.tick) sel.push(`${qcol(c.tick)} AS tick`);
-  if (c.ctlEnt) sel.push(`${qcol(c.ctlEnt)} AS ent`);   // your player's entity number: soul-change messages name it
-  if (c.ctlEnt && c.ctlPawn && c.pawnEnt) sel.push(`${qcol(c.ctlPawn)} AS pawn`);
-  if (c.alive) sel.push(`${qcol(c.alive)} AS alive`);
-  if (c.respawn) sel.push(`${qcol(c.respawn)} AS respawn`);
-  return `SELECT ${sel.join(", ")} FROM ${qtable(c.table)} WHERE ${qcol(c.hero)} > 0` + (thin && c.tick ? ` AND ${qcol(c.tick)} % ${THIN_TICKS} = 0` : "");
+  if (c.ctlEnt) sel.push(`${every(qcol(c.ctlEnt))} AS ent`);   // your player's entity number: soul-change messages name it
+  if (c.ctlEnt && c.ctlPawn && c.pawnEnt) sel.push(`${every(qcol(c.ctlPawn))} AS pawn`);
+  if (c.alive) sel.push(`${often(qcol(c.alive))} AS alive`);
+  if (c.respawn) sel.push(`${often(qcol(c.respawn))} AS respawn`);
+  return `SELECT ${sel.join(", ")} FROM ${qtable(c.table)}`;   // no WHERE: see above
 }
 /* Your souls from your hero entity, found through the player-hero link (see pawnFor). */
 function linkSoulsSql(c, ent, thin = false) {
@@ -2608,27 +2640,6 @@ function startRulesStream() {
 function teamSql(c) {
   return `SELECT ${qcol(c.teamNum)} AS team, ${qcol(c.teamFlex)} AS flex FROM ${qtable(c.teamTable)}`;
 }
-/* Your hero entity (for the shop area and full-price sell-backs in a later version). The v2.6.3 link and the v2.7.1
-   sample both asked for hero entities with a filter and got nothing; filtered requests seem to return nothing on
-   tables other than the player table. So this sample asks without a filter and stops after a second or two of data
-   (12 hero entities update many times a second): entity numbers, the player handle each points back at, the tick
-   and the shop-area flag, next to your player's raw hero handle. Nothing personal. */
-const PROBE_MS = 60000, PROBE_ROWS = 120;
-function startProbes() {
-  const c = LIVE.cols;
-  if (!LIVE.url || !LIVE.applied || LIVE.probe || !c || !c.pawnTable || !c.pawnEnt) return;
-  LIVE.probe = { started: Date.now(), pawns: [], problems: {} };
-  const cols = [[c.pawnEnt, "ent"], [c.pawnCtl, "ctl"], [c.pawnTick, "tick"], [c.pawnShop, "shop"]].filter(([n]) => n);
-  const sql = `SELECT ${cols.map(([n, a]) => `${qcol(n)} AS ${a}`).join(", ")} FROM ${qtable(c.pawnTable)}`;
-  LIVE.streams["probe-pawns"] = liveStream("probe-pawns", sql, r => {
-    const P = LIVE.probe; if (!P) return;
-    if (P.pawns.length < PROBE_ROWS) P.pawns.push(cols.map(([, a]) => r[a] ?? null));
-    if (P.pawns.length >= PROBE_ROWS) { LIVE.streams["probe-pawns"]?.stop(); delete LIVE.streams["probe-pawns"]; }
-  }, detail => { if (LIVE.probe) LIVE.probe.problems.pawns = String(detail).slice(0, 160); delete LIVE.streams["probe-pawns"]; });
-  LIVE.probe.columns = cols.map(([, a]) => a);
-  const st = LIVE.streams["probe-pawns"];
-  setTimeout(() => { st?.stop(); if (LIVE.streams["probe-pawns"] === st) delete LIVE.streams["probe-pawns"]; }, PROBE_MS);
-}
 function startTeamStream() {
   const c = LIVE.cols;
   if (LIVE.streams.team || !LIVE.url || !c?.teamTable || !c.teamNum || !c.teamFlex || !LIVE.applied) return;
@@ -2675,7 +2686,7 @@ function startSoulsStream() {
     const ent = handleIndex(me.pawn);
     if (ent != null) {
       LIVE.soulsLink = { ent, ctlEnt: me.ent, ok: 0, bad: 0 };
-      LIVE.streams.souls = liveStream("souls", linkSoulsSql(c, ent, LIVE.thin === true), onLinkSoulsRow, detail => { delete LIVE.streams.souls; dropSoulsLink("request not accepted: " + String(detail).slice(0, 100)); });
+      LIVE.streams.souls = liveStream("souls", linkSoulsSql(c, ent), onLinkSoulsRow, detail => { delete LIVE.streams.souls; dropSoulsLink("request not accepted: " + String(detail).slice(0, 100)); });
       clearTimeout(LIVE.soulsCheck);
       LIVE.soulsCheck = setTimeout(() => { if (!LIVE.soulsLink?.ok) dropSoulsLink("no rows for your hero entity"); }, SOULS_FALLBACK_MS);
       return;
@@ -2985,7 +2996,7 @@ function applyRoster() {
     LIVE.applied = true; S.lastMatchId = LIVE.id; saveMatch(); tlMark("teams set up");
     if (!S.active && S.enemies.length) recommend();
   }
-  startSoulsStream(); startRulesStream(); startTeamStream(); startProbes();
+  startSoulsStream(); startRulesStream(); startTeamStream();
   if (!LIVE.lobby || LIVE.lobby.matchId !== LIVE.id) { if (!LIVE.lobbyRetryAt || Date.now() > LIVE.lobbyRetryAt) fetchLobbyRank(); }
   if (S.active && (invChanged || teamChanged || laneChanged)) renderResults();
   // One message per stage (teams from the Watch list, then fully live), never repeated or written over
@@ -3092,7 +3103,6 @@ function logDiag() {
     d.recalcMs = S.lastRecalcMs ?? null; d.errors = ERRORS.slice();
     d.streams = LIVE.streamInfo || {}; d.soulsUnfiltered = !!LIVE.soulsUnfiltered; d.soulsHeroesSeen = LIVE.soulsHeroesSeen || null; d.soulsGaveUp = !!LIVE.soulsGaveUp;
     d.soulsVia = LIVE.soulsVia || null; d.soulsEventsFailed = LIVE.soulsEventsFailed || null; d.soulsEventRows = LIVE.soulsEvents ? { ok: LIVE.soulsEvents.ok, bad: LIVE.soulsEvents.bad, all: LIVE.soulsEvents.rows, sample: LIVE.soulsEvents.sample } : null; d.soulsLinkFailed = LIVE.soulsLinkFailed || null; d.soulsLinkRows = LIVE.soulsLink ? { ok: LIVE.soulsLink.ok, bad: LIVE.soulsLink.bad } : null; d.rawSoulsAny = LIVE.rawSoulsAny || null;
-    d.probe = LIVE.probe ? { columns: LIVE.probe.columns, pawns: LIVE.probe.pawns, problems: LIVE.probe.problems, myPawnHandle: LIVE.ctlOf?.[S.me]?.pawn ?? null, myEntity: LIVE.ctlOf?.[S.me]?.ent ?? null } : null;
     d.entities = LIVE.ctlOf ? Object.fromEntries(Object.entries(LIVE.ctlOf).map(([h, x]) => [h, x.ent])) : null;   // hero -> entity number, to read the probe
     d.timeline = LIVE.timeline?.length ? LIVE.timeline.map(([k, at]) => [k, Math.round((at - LIVE.timeline[0][1]) / 1000)]) : null;
     d.thin = LIVE.thin ?? null; d.thinRejected = LIVE.thinRejected || null; d.deathSamples = LIVE.deathSamples || null; d.deaths = (S.deaths || []).slice(0, 40);
@@ -4070,7 +4080,7 @@ async function init() {
       $("window").querySelector('[value="patch"]').disabled = true;
       status += " Couldn't read the patch list, so the last 30 days are used.";
     }
-    $("window").value = S.defaultWindow;
+    $("window").value = windowDefault(); syncStatControls();
     if (carried) status += " Your settings were brought over from your downloaded copy.";
     $("status").textContent = status;
     setTimeout(checkForUpdate, 3000);
@@ -4141,7 +4151,9 @@ $("logClear").onclick = () => {
   renderLogSummary();
 };
 $("logNote").oninput = () => { const r = LOG.cur || LOG.records[LOG.records.length - 1]; if (r) { r.note = $("logNote").value.slice(0, 500); logSave(); } };
-$("window").onchange = () => { S.windowFrom = null; };
+$("window").onchange = () => { S.windowFrom = null; store.set("window", $("window").value); rankChanged(); logEvent("setting", { window: $("window").value }); };
+$("liveRank").onchange = () => { $("rankRange").value = $("liveRank").value; $("rankRange").onchange(); };
+$("liveWindow").onchange = () => { $("window").value = $("liveWindow").value; $("window").onchange(); };
 $("souls").oninput = () => {
   const b = soulBase();
   if (b && b.src !== "live") {   // a typed number corrects the estimate from here on
@@ -4212,8 +4224,8 @@ $("clearAll").onclick = () => {
   S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.flexManual = 0; S.skipped = {}; S.deaths = []; S.soulsRef = null; S.selected = null; S.tab = null; S.view = null; S.cache = {}; S.pending = []; S.windowFrom = null;
   unlinkMatch(true); $("matchId").value = ""; liveDiag(""); liveStatus("Cleared for a new match. Press Find my match once you're in the game, or set things up by hand.");
   $("souls").value = 0; setPhase("lane");
-  $("rankRange").value = "auto"; store.set("rank", "auto"); S.rankWiden = 0; renderRankNote();
-  $("window").value = S.defaultWindow;
+  // Your rank and period choices stay (v2.7.4): they're picked before finding a match, not per match.
+  S.rankWiden = 0; $("window").value = windowDefault(); renderRankNote();
   ["heroSearch", "enemySearch", "itemSearch"].forEach(id => $(id).value = "");
   S.slot = "all"; $("slotFilter").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.slot === "all"));
   $("pickerOverlay").hidden = true; $("toast").hidden = true; undoState = null;
