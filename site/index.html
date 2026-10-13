@@ -43,7 +43,19 @@
   #summary { flex: 1 1 240px; min-width: 0; font-weight: 600; }
   .ok-text { color: var(--good); } .warn-text { color: var(--warn); font-weight: 600; }
   .updnote { display: inline-flex; gap: 6px; align-items: center; }
-  .statpick select { max-width: 100%; }
+  /* "Statistics from" on one line, "Matches from" on the next; the labels share a width so the boxes line up. */
+  .statpick { display: grid; gap: 6px; }
+  .statline { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); align-items: center; gap: 8px; }
+  .statline label { font-weight: 600; }
+  .statline select { max-width: 100%; min-width: 0; justify-self: start; }
+  @media (max-width: 380px) { .statline { grid-template-columns: 1fr; gap: 3px; } }
+  .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .notes h3 { font-size: 14px; margin: 10px 0 4px; } .notes ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+  .notes .when { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+  .fb select { width: 100%; max-width: 100%; }
+  .sheet.fb, .sheet.notes { box-sizing: border-box; max-width: 100%; overflow-y: auto; }
+  .fb textarea { width: 100%; min-height: 110px; font: 14px var(--body); padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); box-sizing: border-box; }
+  #logSetup > details > summary { cursor: pointer; font-weight: 600; }
   .updnote .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--muted); }
   .updnote.ok .dot { background: var(--good); } .updnote.new .dot { background: var(--bad); }
   .updnote.new { color: var(--bad); font-weight: 600; }
@@ -273,8 +285,10 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.7.4</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.8</span>
     <span class="small updnote" id="updNote" hidden></span>
+    <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
+    <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
   </div>
 
   <div id="setup">
@@ -300,11 +314,9 @@
         <button id="steamChange" class="btn tiny" type="button">Change</button>
       </div>
       <div id="steamResults"></div>
-      <div class="rowflex statpick">
-        <label for="liveRank" class="small">Statistics from</label>
-        <select id="liveRank" aria-describedby="liveStatNote"></select>
-        <label for="liveWindow" class="small">Matches from</label>
-        <select id="liveWindow" aria-describedby="liveStatNote"></select>
+      <div class="statpick">
+        <div class="statline"><label for="liveRank" class="small">Statistics from</label><select id="liveRank" aria-describedby="liveStatNote"></select></div>
+        <div class="statline"><label for="liveWindow" class="small">Matches from</label><select id="liveWindow" aria-describedby="liveStatNote"></select></div>
       </div>
       <p class="muted small" id="liveStatNote"></p>
       <div class="rowflex">
@@ -377,8 +389,14 @@
     </section>
 
     <section class="card" id="logSetup" aria-labelledby="logTitle">
-      <div class="card-head"><h2 id="logTitle">Match records</h2><span class="tag">For testing and improving the tool</span></div>
-      <p class="muted small">While this is on, the tool keeps a record of each match on this computer: the heroes, items and souls it saw, what it recommended and when, and what you bought. Nothing is sent anywhere, and other players' Steam accounts aren't recorded. Save the records to a file to share them.</p>
+      <details id="logDetails">
+      <summary><span id="logTitle">Match records</span> <span class="muted small">(optional: help improve the tool)</span></summary>
+      <div class="small logexplain">
+        <p><b>What it is.</b> A match record is a file that lets someone replay your match through the tool: what it saw and what it suggested at each moment. It's how problems with recommendations get found and fixed. You don't need it to use the tool.</p>
+        <p><b>How it works.</b> While "Record my matches" is ticked, the tool records each match by itself, in this browser only. Nothing is sent anywhere. The last 4 matches are kept; older ones are dropped. After a match, press <b>Save records to a file</b> to get a <code>.json</code> file (it goes to your Downloads folder unless your browser asks where).</p>
+        <p><b>What's in it.</b> The match number, every hero in the match and the items they bought, your souls and deaths, the statistics used, the tool's suggestions with their times, and your note if you add one. No names and no Steam accounts. It also notes which browser you used, to help with browser problems.</p>
+        <p><b>Sharing it.</b> Use <b>Feedback</b> at the top of the page and attach the file to your report. Anyone can look up a match from its number, so only share records you're comfortable sharing.</p>
+      </div>
       <label class="check small"><input type="checkbox" id="logOn" checked> Record my matches</label>
       <p class="small" id="logSummary"></p>
       <div class="field">
@@ -393,6 +411,7 @@
       <p class="small ok-text" id="logSaved" role="status"></p>
       <p class="muted small" id="logWhere" hidden></p>
       <label class="check small" id="logAutoRow" hidden><input type="checkbox" id="logAuto" checked> Update this file by itself when each match ends</label>
+      </details>
     </section>
   </div>
 
@@ -430,6 +449,33 @@
   </div>
 </main>
 
+<div id="notesOverlay" class="overlay" hidden>
+  <div class="sheet notes" role="dialog" aria-labelledby="notesTitle">
+    <div class="mod-head"><h2 id="notesTitle">What's new</h2><button id="notesClose" class="btn" type="button">Close</button></div>
+    <div id="notesBody" class="scroll"></div>
+  </div>
+</div>
+<div id="feedbackOverlay" class="overlay" hidden>
+  <div class="sheet fb" role="dialog" aria-labelledby="fbTitle">
+    <div class="mod-head"><h2 id="fbTitle">Send feedback</h2><button id="fbClose" class="btn" type="button">Close</button></div>
+    <p class="small">Something seemed wrong, or have an idea? Write it here, then continue on GitHub to send it. You'll need a free GitHub account. Reports there are <b>public</b>, so don't include personal details.</p>
+    <div class="field"><label for="fbArea">It's about</label>
+      <select id="fbArea">
+        <option value="A recommendation">A recommendation (an item suggested, or missing)</option>
+        <option value="The live match link">The live match link (connecting, souls, items)</option>
+        <option value="The layout or wording">The layout or wording</option>
+        <option value="An idea">An idea or suggestion</option>
+        <option value="Something else">Something else</option>
+      </select></div>
+    <div class="field"><label for="fbText">What happened, or what you'd like</label>
+      <textarea id="fbText" placeholder="For example: at 12:00 it suggested Healbane first, but nobody on the enemy team heals."></textarea></div>
+    <label class="check small"><input type="checkbox" id="fbContext" checked> Add the tool version, your hero, the game time and the current buy order (no names or accounts)</label>
+    <label class="check small"><input type="checkbox" id="fbRecord"> I'll attach a match record</label>
+    <p class="small" id="fbRecordHelp" hidden>First press <button id="fbSaveRecords" class="linkbtn" type="button">Save records to a file</button>. Then, on the GitHub page, drag that file into the "Match record" box. If GitHub won't take a <code>.json</code> file, rename it to end in <code>.txt</code>. A record holds the match number, the heroes and items in it, and the tool's suggestions: no names or Steam accounts, but anyone can look up a match by its number.</p>
+    <div class="rowflex"><button id="fbSend" class="btn main" type="button">Continue on GitHub</button><button id="fbCopy" class="btn" type="button">Copy the text instead</button></div>
+    <p class="muted small" id="fbNote" role="status"></p>
+  </div>
+</div>
 <div id="pickerOverlay" class="overlay" hidden>
   <div class="sheet" role="dialog" aria-label="Add items you own">
     <div class="mod-head"><h2>Items you already own</h2><button id="closePicker" class="btn" type="button">Done</button></div>
@@ -451,7 +497,39 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.7.4";   // shown in the top bar and written into match records
+const VERSION = "v2.8";   // shown in the top bar and written into match records
+/* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
+   (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
+const PATCH_NOTES = [
+  { v: "v2.8", date: "October 13, 2026", items: [
+    "In the laning stage, counters against your lane opponent now come from games where players actually laned against that hero, mixed with the whole-match numbers when there are few such games. The details say \"in lane\".",
+    "Items changed by a game update are marked \"Changed\" (or \"New item\") for two weeks, because statistics from before the change may not fit them.",
+    "\"Statistics from\" and \"Matches from\" now sit on separate lines on the live match card.",
+    "New: this \"What's new\" panel, and a Feedback button for reporting problems or ideas, with an optional match record.",
+    "Match records are tucked into a closed section with a plain explanation of what they are and how to share one."] },
+  { v: "v2.7.4", date: "October 13, 2026", items: [
+    "Fixed the cause of a slow live link: since v2.7 it took about 3.5 minutes to start, and item updates came in bursts every few minutes. The start should be back to about a minute, with updates every few seconds.",
+    "\"Statistics from\" (rank) and \"Matches from\" (latest patch or last 30 days) are on the live match card, and both are remembered."] },
+  { v: "v2.7.3", date: "October 13, 2026", items: [
+    "The web version: vmoppy.github.io/deadlock-advisor always runs the latest release.",
+    "A dot by the version number: green when up to date, red when a newer version is out.",
+    "The \"Web version\" link in a downloaded copy brings your settings along."] },
+  { v: "v2.7.2", date: "October 12, 2026", items: [
+    "Your real souls are read from the live match (the box says \"live\"), instead of being estimated from your net worth."] },
+  { v: "v2.7", date: "October 12, 2026", items: [
+    "While you're dead, a note says it's a good time to shop, with your next buy and the respawn countdown.",
+    "The Golden Goose Egg's stored souls stop counting while you're dead."] },
+  { v: "v2.6.3", date: "October 12, 2026", items: [
+    "When a cheap item and an expensive one are about equally good, the one you can buy sooner comes first (no more saving for a Tier 2 from the very start without a good reason).",
+    "Reopening the page mid-match is faster: statistics are kept for 6 hours."] },
+  { v: "v2.6.2", date: "October 12, 2026", items: [
+    "Far fewer suggestions to sell items, and never to buy something cheaper.",
+    "Upgrade paths are marked: Upgrade, Part first or Outright, with the reason.",
+    "Fixed: items you owned could be suggested again after the live link reconnected."] },
+  { v: "v2.6.1", date: "October 12, 2026", items: [
+    "Recommendations no longer favour rarely bought or out-of-stage items without a good reason.",
+    "\"Not for me\" (✕) removes an item from the suggestions for the rest of the match."] }
+];
 const PHASES = { lane: [0, 540], mid: [540, 1200], late: [1200, null] };
 const PHASE_NAMES = { lane: "Laning", mid: "Mid game", late: "Late game" };
 const BOUNDARIES = [[540, "lane", "mid"], [1200, "mid", "late"]];
@@ -468,6 +546,7 @@ const WEAK_Z = 1.0;
      a few hundred games counted almost in full, and summed across six enemies.)
    - Between items of the same price at a stage, the real spread is about 1.3 to 2.5 points.
    Build fit (pairs well with an item you own) has no measurement yet; it gets a cautious 1 point. */
+const LANE_N0 = 300;         // lane-specific counters (v2.8): with n lane games, they count n / (n + 300) against the whole-match numbers
 const TAU_ENEMY = 0.005;     // real edge of an item against one particular enemy (measured: 0.2 to 0.7 pts)
 const TAU_ITEM = 0.02;       // real difference between items of the same price at a stage (measured: 1.3 to 2.5 pts)
 const TAU_FIT = 0.01;        // pairs well or badly with an item you own (not measured yet)
@@ -566,6 +645,29 @@ window.addEventListener("error", e => noteUnexpectedError("error", e.error || e.
 window.addEventListener("unhandledrejection", e => noteUnexpectedError("async error", e.reason));
 
 /* ---------- Pure helpers (tested separately) ---------- */
+/* Patch awareness (v2.8): a short fingerprint of what matters about an item (price, tier, parts, every stat value),
+   so the next visit can tell which items a game update changed. */
+function itemSig(it) {
+  const props = Object.entries(it.properties || {}).filter(([, v]) => v && v.value != null).map(([k, v]) => k + "=" + v.value).sort().join(";");
+  const text = [it.cost, it.item_tier, it.item_slot_type, it.is_active_item ? 1 : 0, (it.component_items || []).slice().sort().join(","), props].join("|");
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h.toString(36);
+}
+/* Compare this visit's items with the last one: items whose fingerprint changed, and new ones. prev: { sigs, at }.
+   Earlier changes are kept for CHANGE_KEEP_MS, so a note stays for a while after a patch. */
+const CHANGE_KEEP_MS = 14 * 86400000;
+function itemChanges(items, prev, kept = {}, now = Date.now()) {
+  const sigs = Object.fromEntries(items.map(it => [it.id, itemSig(it)]));
+  const changes = {};
+  for (const [id, c] of Object.entries(kept || {})) if (c && now - c.at < CHANGE_KEEP_MS) changes[id] = c;
+  if (prev?.sigs) for (const it of items) {
+    const old = prev.sigs[it.id];
+    if (old == null) { if (Object.keys(prev.sigs).length) changes[it.id] = { at: now, kind: "new" }; }
+    else if (old !== sigs[it.id]) changes[it.id] = { at: now, kind: "changed" };
+  }
+  return { sigs, changes };
+}
 /* Is version a newer than b? ("v2.7.10" > "v2.7.9" > "v2.7"; anything unreadable is never newer.) */
 function newerVersion(a, b) {
   const p = v => /^v\d+(\.\d+)*$/.test(String(v)) ? String(v).slice(1).split(".").map(Number) : null;
@@ -741,6 +843,11 @@ function buildFit(baseline, perAnchor) {
    so what's left is how much better this particular item does against that enemy.
    Each enemy is weighted by how dangerous they are to your hero (threat), doubled for your lane opponent
    while laning. Small samples are shrunk toward "no difference". */
+/* Whole-match and lane-specific results against one enemy, combined: the lane result counts n / (n + LANE_N0). */
+function laneBlend(lift, se, laneLift, laneSe, laneN) {
+  const w = laneN / (laneN + LANE_N0);
+  return { w, lift: w * laneLift + (1 - w) * lift, se: Math.sqrt((w * laneSe) ** 2 + ((1 - w) * se) ** 2) || se };
+}
 function enemyShifts(base, perEnemy) {
   return perEnemy.map(({ enemyId, rows }) => {
     const idx = new Map(rows.map(r => [r.item_id, r]));
@@ -753,9 +860,13 @@ function enemyShifts(base, perEnemy) {
     return { enemyId, idx, shift: weightedMedian(diffs) };
   });
 }
-function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, threat = new Map(), covered = new Map() }) {
+function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, threat = new Map(), covered = new Map(), laneRows = null }) {
   const base = new Map(baseline.map(r => [r.item_id, r]));
   const enemies = enemyShifts(base, perEnemy);
+  /* Lane counters (v2.8): in the laning stage, statistics against a lane opponent from games where the buyer laned
+     against that hero (same_lane_filter). There are fewer such games, so each item's lane result is blended with its
+     whole-match result by sample size (laneBlend). */
+  const lanes = phase === "lane" && laneRows ? new Map(enemyShifts(base, [...laneRows].filter(([e]) => laneIds.has(e)).map(([enemyId, rows]) => ({ enemyId, rows }))).map(x => [x.enemyId, x])) : new Map();
   const out = [];
   for (const it of items) {
     if (owned.has(it.id) || covered.has(it.id)) continue;   // owned, or already part of something you own
@@ -770,11 +881,20 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
       const r = idx.get(it.id);
       if (!r || r.matches < MIN_GAMES) continue;
       const pe = wr(r);
-      const lift = pe - pb - shift;
-      const se = Math.sqrt(pe * (1 - pe) / r.matches + pb * (1 - pb) / b.matches) || 1;
+      let lift = pe - pb - shift;
+      let se = Math.sqrt(pe * (1 - pe) / r.matches + pb * (1 - pb) / b.matches) || 1;
+      const L = lanes.get(enemyId), lr = L?.idx.get(it.id);
+      let laneInfo = null;
+      if (lr && lr.matches >= MIN_GAMES) {
+        const pl = wr(lr), laneLift = pl - pb - L.shift;
+        const seL = Math.sqrt(pl * (1 - pl) / lr.matches + pb * (1 - pb) / b.matches) || 1;
+        const m = laneBlend(lift, se, laneLift, seL, lr.matches);
+        laneInfo = { lift: laneLift, n: lr.matches, pe: pl, w: m.w };
+        lift = m.lift; se = m.se;
+      }
       const z = lift / se;
       const weight = (threat.get(enemyId) || 1) * (phase === "lane" && laneIds.has(enemyId) ? 2 : 1);
-      vs.push({ enemyId, lift, z, n: r.matches, pe, shift });
+      vs.push({ enemyId, lift, z, n: r.matches, pe, shift, lane: laneInfo });
       score += lift * trust(se, TAU_ENEMY) * weight;
       num += weight * lift; den += (weight * se) ** 2;
       if (z > best) best = z;
@@ -1425,7 +1545,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const lists = ready.map(p => {
     const e = p.entry;
     return { w: p.w / wsum, scored: scoreItems({ baseline: e.baseline, perEnemy: e.ready ? e.perEnemy : [], items, owned, souls,
-      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, threat: threatW, covered }) };
+      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, threat: threatW, covered, laneRows: p.laneRows || null }) };
   });
   const merged = mergeScored(lists);
   // Stage value without the wealth bias, and timing (flow data; optional).
@@ -1908,6 +2028,41 @@ function fetchPhase(entry, q) {
   return entry.promise;
 }
 function currentPlan() { return phasePlan(clockSeconds(), S.phase); }
+/* Item-pair statistics (planned for v2.8.1): the data service's documentation doesn't describe their format, so once per
+   hero and visit the tool asks for them and keeps the shape of the answer (field names, a few rows of item numbers and
+   counts, nothing personal) in the match record. Only while recording; the answer isn't used yet. */
+function probePairs() {
+  if (!LOG.on || !S.me || S.pairProbe?.hero === S.me) return;
+  const [minB, maxB] = rankBounds();
+  const q = new URLSearchParams({ hero_ids: S.me, comb_size: 2, min_matches: 500, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: timeWindow().from });
+  const P = S.pairProbe = { hero: S.me, at: Date.now() };
+  getJSON(`/v1/analytics/item-permutation-stats?${q}`).then(rows => {
+    const list = Array.isArray(rows) ? rows : Array.isArray(rows?.data) ? rows.data : null;
+    P.type = Array.isArray(rows) ? "array" : typeof rows;
+    P.count = list ? list.length : null;
+    P.keys = list?.[0] && typeof list[0] === "object" ? Object.keys(list[0]).slice(0, 20) : (rows && typeof rows === "object" ? Object.keys(rows).slice(0, 20) : null);
+    P.sample = list ? JSON.stringify(list.slice(0, 3)).slice(0, 600) : String(JSON.stringify(rows)).slice(0, 300);
+  }, e => { P.error = String(e?.message || e).slice(0, 160); });
+}
+/* Lane counters (v2.8): for each lane opponent, items bought in the laning stage by players who laned against that
+   hero (the data service's same_lane_filter). One request per lane opponent; kept for the match (and its rank and
+   period). Optional: until they arrive, or if they fail, the whole-match numbers are used. */
+const laneKey = e => { const [minB, maxB] = rankBounds(); return [S.me, e, minB, maxB, timeWindow().from].join("|"); };
+function laneRowsNow() {
+  const m = new Map();
+  for (const e of S.lane) {
+    const k = laneKey(e), have = (S.laneStats ||= {})[k];
+    if (have?.rows) { m.set(e, have.rows); continue; }
+    if (have && !(have.failedAt && Date.now() - have.failedAt > 30000)) continue;   // loading, or failed recently
+    const x = S.laneStats[k] = { loading: true };
+    const [minB, maxB] = rankBounds(), [fromS, toS] = PHASES.lane;
+    const q = new URLSearchParams({ hero_ids: S.me, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: timeWindow().from,
+      min_matches: 1, min_bought_at_s: fromS, max_bought_at_s: toS, corrupted_items: "exclude", enemy_hero_ids: e, same_lane_filter: "true" });
+    getJSON(`/v1/analytics/item-stats?${q}`).then(rows => { x.rows = Array.isArray(rows) ? rows : []; x.loading = false; x.at = Date.now(); renderResults(); },
+      () => { x.loading = false; x.failedAt = Date.now(); });
+  }
+  return m;
+}
 
 /* Your hero's win rate against each hero, for threat weights (one request per hero, rank and window). */
 async function loadThreats() {
@@ -3104,6 +3259,7 @@ function logDiag() {
     d.streams = LIVE.streamInfo || {}; d.soulsUnfiltered = !!LIVE.soulsUnfiltered; d.soulsHeroesSeen = LIVE.soulsHeroesSeen || null; d.soulsGaveUp = !!LIVE.soulsGaveUp;
     d.soulsVia = LIVE.soulsVia || null; d.soulsEventsFailed = LIVE.soulsEventsFailed || null; d.soulsEventRows = LIVE.soulsEvents ? { ok: LIVE.soulsEvents.ok, bad: LIVE.soulsEvents.bad, all: LIVE.soulsEvents.rows, sample: LIVE.soulsEvents.sample } : null; d.soulsLinkFailed = LIVE.soulsLinkFailed || null; d.soulsLinkRows = LIVE.soulsLink ? { ok: LIVE.soulsLink.ok, bad: LIVE.soulsLink.bad } : null; d.rawSoulsAny = LIVE.rawSoulsAny || null;
     d.entities = LIVE.ctlOf ? Object.fromEntries(Object.entries(LIVE.ctlOf).map(([h, x]) => [h, x.ent])) : null;   // hero -> entity number, to read the probe
+    d.pairProbe = S.pairProbe ? { type: S.pairProbe.type ?? null, count: S.pairProbe.count ?? null, keys: S.pairProbe.keys ?? null, sample: S.pairProbe.sample ?? null, error: S.pairProbe.error ?? null } : null;
     d.timeline = LIVE.timeline?.length ? LIVE.timeline.map(([k, at]) => [k, Math.round((at - LIVE.timeline[0][1]) / 1000)]) : null;
     d.thin = LIVE.thin ?? null; d.thinRejected = LIVE.thinRejected || null; d.deathSamples = LIVE.deathSamples || null; d.deaths = (S.deaths || []).slice(0, 40);
     d.replayedRowsIgnored = LIVE.replayedRows || 0;
@@ -3150,6 +3306,12 @@ function logSnapshot(view, ready) {
       const e = p.entry; if (!e.ready || r.stats[e.key]) continue;
       const row = x => [x.item_id, x.wins, x.matches, x.players, Math.round(x.avg_buy_time_s || 0)];
       r.stats[e.key] = { phase: p.phase, query: e.q, baseline: e.baseline.map(row), perEnemy: e.perEnemy.map(pe => [pe.enemyId, pe.rows.map(row)]) };
+    }
+    // Lane counters (v2.8): each lane opponent's lane-only statistics, once.
+    for (const p of ready) {
+      const st = r.stats[p.entry.key]; if (!st || !p.laneRows) continue;
+      const row = x => [x.item_id, x.wins, x.matches, x.players, Math.round(x.avg_buy_time_s || 0)];
+      for (const [e, rows] of p.laneRows) { st.lane ||= {}; if (!st.lane[e]) st.lane[e] = rows.map(row); }
     }
     // Build-fit statistics (items bought alongside ones you own), once per set of anchor items.
     for (const p of ready) {
@@ -3359,7 +3521,17 @@ function stepMarks(entry) {
   // How this step fits an upgrade path, at a glance.
   const pathMark = entry.upgrade ? "Upgrade · " : entry.path?.kind === "direct" ? "Outright · " : entry.why?.startsWith("Builds into") ? "Part first · " : "";
   if (pathMark) { const m = document.createElement("span"); m.className = "tag-path"; m.textContent = pathMark; m.title = entry.pathText || entry.plan || ""; out.push(m); }
+  const ch = changeNote(entry.s.item.id);
+  if (ch) { const m = document.createElement("span"); m.className = "tag-ex"; m.textContent = ch.short + " · "; m.title = ch.long; out.push(m); }
   return out;
+}
+/* Items changed by a recent game update (patch awareness, v2.8): statistics from before the change may not fit it. */
+function changeNote(id) {
+  const c = S.itemChanges?.[id]; if (!c) return null;
+  const when = new Date(c.at).toLocaleDateString("en-CA", { month: "long", day: "numeric" });
+  return c.kind === "new"
+    ? { short: "New item", long: `New in a recent game update (first seen ${when}). It has few games yet, so its statistics count for less.` }
+    : { short: "Changed", long: `Changed in a recent game update (price or stats, first seen ${when}). Statistics from before the change may not fit it; "Since the latest patch" uses only games after it.` };
 }
 function rowEl(entry, souls, n) {
   const { s, kind, why } = entry;
@@ -3403,6 +3575,7 @@ function detailLines(s, kind, souls, entry) {
     for (const v of (s.vs || []).filter(v => v.lift > 0).sort((a, b) => b.lift - a.lift).slice(0, 4)) {
       const t = S.view?.threat?.get(v.enemyId);
       lines.push(`Against <b>${esc(heroName(v.enemyId))}</b>${S.lane.has(v.enemyId) ? " (your lane)" : ""}: won <span class="num">${pct(v.pe)}</span> of ${v.n.toLocaleString()} games, versus <span class="num">${pct(s.pb)}</span> normally. `
+        + (v.lane ? `In lane against ${esc(heroName(v.enemyId))} (${v.lane.n.toLocaleString()} games where the buyer laned against them): won <span class="num">${pct(v.lane.pe)}</span>; the lane result counts ${Math.round(v.lane.w * 100)}%. ` : "")
         + `After allowing for how ${esc(S.heroById[S.me].name)} does against ${esc(heroName(v.enemyId))} in general, that's <span class="up">${pts(v.lift)} pts</span>.`
         + (t && t.weight > 1.05 ? ` ${esc(heroName(v.enemyId))} is a tough matchup for you (${pct(t.wr)} win rate), so this counts extra.` : ""));
     }
@@ -3502,7 +3675,7 @@ function renderDetail(entry, souls, labelText) {
   // Short reasons
   const tough = id => (S.view?.threat?.get(id)?.weight || 1) > 1.05;
   const counters = (s.vs || []).filter(x => x.lift > 0).sort((a, b) => b.lift - a.lift).slice(0, 4)
-    .map(x => [`vs ${heroName(x.enemyId)}${S.lane.has(x.enemyId) ? " (your lane)" : ""}${tough(x.enemyId) ? " · tough matchup" : ""}`, `${pts(x.lift)} pts`, "up"]);
+    .map(x => [`vs ${heroName(x.enemyId)}${x.lane ? " in lane" : S.lane.has(x.enemyId) ? " (your lane)" : ""}${tough(x.enemyId) ? " · tough matchup" : ""}`, `${pts(x.lift)} pts`, "up"]);
   const fits = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 3)
     .map(f => [`with ${itemName(f.anchorId)}`, `${pts(f.lift)} pts`, "up"]);
   const live = (s.mechWhy || []).map(x => [x, null]);
@@ -3533,7 +3706,9 @@ function renderDetail(entry, souls, labelText) {
     : `Buy ${itemName(entry.upgrade.from)} first (earlier in the buy order), then pay only the ${s.cost.toLocaleString()} difference.`, null]);
   else if (entry.why?.startsWith("Builds into")) pathRows.push(["Buy it now for its stats; the plan upgrades it later, when the extra cost is worth more than other items.", null]);
   const timeline = (s.flow?.cols || []).map((x, c) => x ? [`Bought at ${FLOW_COLS[c]}${c === k ? " (now)" : ""}: ${x.n.toLocaleString()} games`, `${pts(x.raw)} pts`, x.raw >= 0 ? "up" : "down"] : null).filter(Boolean);
-  for (const sec of [factList("Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList("From the live match", live), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
+  const ch = changeNote(it.id);
+  const patchRows = ch ? [[ch.long, null]] : [];
+  for (const sec of [factList("Recent game update", patchRows), factList("Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList("From the live match", live), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
   if (!s.base && kind !== "owned" && kind !== "search") { const p = document.createElement("p"); p.className = "muted small"; p.textContent = "Not enough games to rate this item by itself."; box.append(p); }
   const text = itemText(it);
   if (text) {
@@ -3612,6 +3787,8 @@ function renderResultsInner() {
     if (!e || (e.error && Date.now() - e.failedAt > 15000)) ensurePhase(p.phase).then(renderResults);
   }
   const ready = plan.map(p => ({ ...p, entry: S.cache[dataKey(p.phase)] })).filter(p => p.entry && (p.entry.ready || p.entry.baseReady));
+  for (const p of ready) if (p.phase === "lane" && p.entry.ready) p.laneRows = laneRowsNow();
+  probePairs();
   const prelim = ready.some(p => !p.entry.ready);
   if (!ready.length) {
     // Never blank the board while new data loads: keep the last buy order and say it's updating.
@@ -4061,6 +4238,9 @@ async function init() {
       .sort((a, b) => (a.cost - b.cost) || a.name.localeCompare(b.name));
     S.items.forEach(i => S.itemById[i.id] = i);
     S.prog = buildProgression(S.items, S.itemByClass);   // what builds into what (redundancy, parts, repurchases)
+    // Patch awareness: which items changed since your last visit (kept 14 days). The first visit only remembers.
+    const ic = itemChanges(S.items, store.get("itemSigs"), store.get("itemChanges"));
+    S.itemChanges = ic.changes; store.set("itemSigs", { at: Date.now(), sigs: ic.sigs }); store.set("itemChanges", ic.changes);
     logInit(); $("logOn").checked = LOG.on; renderLogSummary(); renderLogWhere(); fileRestore();
     const updates = patches.filter(p => /update|patch/i.test(p.title || "")).map(p => ({ title: p.title, date: new Date(p.pub_date) }))
       .filter(p => !isNaN(p.date)).sort((a, b) => b.date - a.date);
@@ -4198,9 +4378,61 @@ function openSetup(show) {
 $("editSetup").onclick = () => openSetup($("setup").hidden);
 $("livePill").onclick = () => { openSetup(true); $("header").hidden = false; window.scrollTo?.(0, 0); (S.steam ? (LIVE.id ? $("liveStatus") : $("findMatch")) : $("steamInput")).focus?.(); };
 $("openPicker").onclick = () => { $("pickerOverlay").hidden = false; renderPickerList(); $("itemSearch").focus(); };
+/* What's new: the patch notes above. */
+function renderNotes() {
+  const box = $("notesBody"); box.replaceChildren();
+  for (const n of PATCH_NOTES) {
+    const h = document.createElement("h3"); h.textContent = n.v + (n.v === VERSION ? " (this version)" : "") + " ";
+    const w = document.createElement("span"); w.className = "when"; w.textContent = n.date; h.append(w);
+    const ul = document.createElement("ul");
+    for (const t of n.items) { const li = document.createElement("li"); li.textContent = t; ul.append(li); }
+    box.append(h, ul);
+  }
+  const more = document.createElement("p"); more.className = "muted small";
+  more.textContent = "Older versions: the full history is kept with the project.";
+  box.append(more);
+}
+$("notesOpen").onclick = () => { renderNotes(); $("notesOverlay").hidden = false; $("notesClose").focus(); };
+$("notesClose").onclick = () => { $("notesOverlay").hidden = true; };
+$("notesOverlay").onclick = e => { if (e.target === $("notesOverlay")) $("notesOverlay").hidden = true; };
+/* Feedback: written here, sent as a GitHub issue on the public repository (GitHub handles accounts and spam; the
+   owner gets notified). The tool can't send anything itself, so it opens a pre-filled form; a match record is
+   attached there by dragging the saved file in. */
+const FEEDBACK_URL = "https://github.com/vMoppy/deadlock-advisor/issues/new";
+function feedbackContext() {
+  const sec = gameSecondsNow(), order = (S.view?.order || []).slice(0, 4).map(st => st.s.item.name).join(" > ");
+  const ua = navigator.userAgent, browser = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "other";
+  return [`Tool ${VERSION}${onWeb() ? " (web version)" : " (downloaded copy)"}, ${browser}`,
+    S.me ? `Hero: ${heroName(S.me)}` : null, sec != null ? `Game time: ${mmss(sec)}` : null,
+    LIVE.id ? "Linked to a live match" : "Not linked", order ? `Buy order: ${order}` : null,
+    `Statistics: ${rankChoice().label}, ${timeWindow().label}`].filter(Boolean).join("\n");
+}
+function feedbackParts() {
+  const area = $("fbArea").value, text = $("fbText").value.trim().slice(0, 3000);
+  const title = `[${area}] ` + (text.split(/\n/)[0].slice(0, 70) || "Feedback");
+  const context = $("fbContext").checked ? feedbackContext() : "";
+  return { area, text, title, context };
+}
+$("feedbackOpen").onclick = () => { $("feedbackOverlay").hidden = false; $("fbNote").textContent = ""; $("fbText").focus(); };
+$("fbClose").onclick = () => { $("feedbackOverlay").hidden = true; };
+$("feedbackOverlay").onclick = e => { if (e.target === $("feedbackOverlay")) $("feedbackOverlay").hidden = true; };
+$("fbRecord").onchange = () => { $("fbRecordHelp").hidden = !$("fbRecord").checked; };
+$("fbSaveRecords").onclick = () => { if (!LOG.records.length) { $("fbNote").textContent = "There are no match records yet. Play a match with \"Record my matches\" ticked (under Setup → Match records), then come back."; return; } logExport(false); $("fbNote").textContent = "Saved (check your Downloads folder). Now continue on GitHub and drag the file in."; };
+$("fbSend").onclick = () => {
+  const f = feedbackParts();
+  if (!f.text) { $("fbNote").textContent = "Write a few words first."; $("fbText").focus(); return; }
+  const q = new URLSearchParams({ template: "feedback.yml", title: f.title, area: f.area, details: f.text, context: f.context });
+  window.open(FEEDBACK_URL + "?" + q.toString(), "_blank", "noopener");
+  $("fbNote").textContent = "GitHub opened in a new tab. Check the text there, attach your record if you have one, and press Create.";
+};
+$("fbCopy").onclick = async () => {
+  const f = feedbackParts(), text = `${f.title}\n\n${f.text}${f.context ? "\n\n" + f.context : ""}`;
+  try { await navigator.clipboard.writeText(text); $("fbNote").textContent = "Copied. Paste it wherever you're sending it."; }
+  catch { $("fbNote").textContent = "Couldn't copy here. Select the text above and copy it yourself."; }
+};
 $("closePicker").onclick = () => { $("pickerOverlay").hidden = true; };
 $("pickerOverlay").onclick = e => { if (e.target === $("pickerOverlay")) $("pickerOverlay").hidden = true; };
-document.addEventListener("keydown", e => { if (e.key === "Escape") $("pickerOverlay").hidden = true; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay"].forEach(id => { $(id).hidden = true; }); });
 $("toastUndo").onclick = () => (toastUndo || undoBought)();
 $("toastMore").onclick = () => { const f = toastMore; toastMore = null; $("toast").hidden = true; if (f) f(); };
 $("clockStart").onclick = () => { S.clockStart = Date.now(); S.clockStartedOnce = true; S.soulOffset = 0; saveMatch(); tickClock(); loadCurve(); updateSouls(true); };
