@@ -137,6 +137,9 @@
   .hero { display: grid; justify-items: center; gap: 2px; padding: 4px 2px; border: 1px solid var(--line);
     border-radius: 6px; background: transparent; color: var(--fg); cursor: pointer; font: 500 11px/1.15 var(--body); text-align: center; }
   .hero img { width: 36px; height: 36px; object-fit: cover; border-radius: 5px; }
+  .hero .noimg { width: 36px; height: 36px; border-radius: 5px; display: grid; place-items: center; background: var(--line); font: 700 15px/1 var(--display); }
+  .hero .noimg::before { content: attr(data-letter); }
+  .hero .newtag { font: 700 9px/1 var(--body); color: var(--accent); text-transform: uppercase; letter-spacing: .05em; }
   .hero[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
   .hero.enemy[aria-pressed="true"] { border-color: var(--bad); }
   .hero:disabled { opacity: .35; cursor: default; }
@@ -285,7 +288,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.8</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.8.1</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
@@ -353,6 +356,7 @@
         <div class="step-head"><span class="step-num">1</span><h3>Your hero</h3><span id="heroSource" class="src muted small">Remembered for next time</span></div>
         <input id="heroSearch" type="search" placeholder="Search heroes…" aria-label="Search your hero">
         <div id="myHeroes" class="grid"></div>
+        <p id="heroNote" class="muted small" hidden></p>
       </div>
       <div class="sub">
         <div class="step-head"><span class="step-num">2</span><h3>Enemy team</h3><span id="enemySource" class="src muted small">Up to 6. Tap a chosen enemy's chip to mark your lane opponent.</span><button id="useMatchTeams" class="btn tiny" type="button" hidden>Use match data</button></div>
@@ -497,10 +501,15 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.8";   // shown in the top bar and written into match records
+const VERSION = "v2.8.1";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.8.1", date: "October 13, 2026", items: [
+    "When a match can't be connected, the tool now says why, using the game's own answer: the match hasn't started yet, Steam's servers were busy, the match can't be watched, and so on. Before, every one of these showed the same \"still in hero selection\" message.",
+    "If the problem is temporary, the tool tries again by itself after about a minute (at most twice, and never with your last connection of the hour). Pressing Connect still tries straight away.",
+    "New heroes are recognised even before the game data lists them: a hero seen in your match, or played a lot in recent games, is added to the pickers with a \"New\" mark. This fixes Deadman Danny being left out of teams (and \"your Steam account isn't in this match\" when you played him).",
+    "Item pictures now use the game's shop pictures instead of the small versions."] },
   { v: "v2.8", date: "October 13, 2026", items: [
     "In the laning stage, counters against your lane opponent now come from games where players actually laned against that hero, mixed with the whole-match numbers when there are few such games. The details say \"in lane\".",
     "Items changed by a game update are marked \"Changed\" (or \"New item\") for two weeks, because statistics from before the change may not fit them.",
@@ -587,7 +596,7 @@ const SELL_SIDEWAYS_GAIN = 2; // for an item costing less than twice what's sold
 const DROP_KEEP_MS = 180000; // dropped items stay visible for 3 minutes
 
 /* ---------- State ---------- */
-const S = { heroes: [], heroById: {}, items: [], itemById: {}, itemByClass: {}, patch: null,
+const S = { heroes: [], heroById: {}, heroAll: [], heroNews: {}, heroesAdded: [], items: [], itemById: {}, itemByClass: {}, patch: null,
   me: null, enemies: [], lane: new Set(), owned: new Set(), phase: "lane", slot: "all",
   cache: {}, active: false, clockStart: null, curve: null, curveKey: null, soulOffset: 0, lastSouls: null,
   prevOrder: [], dropped: [], droppedBy: 0, soulsRef: null, sold: [], markedAt: {}, removedAt: {}, selected: null, tab: null, view: null, lastPlanSig: "", lastBlendRender: 0, defaultWindow: "30" };
@@ -667,6 +676,85 @@ function itemChanges(items, prev, kept = {}, now = Date.now()) {
     else if (old !== sigs[it.id]) changes[it.id] = { at: now, kind: "changed" };
   }
   return { sigs, changes };
+}
+/* The hero list (v2.8.1). Heroes come from the game data at start-up, which marks each one released or not. After a
+   game update that data can lag behind the game for hours: on October 13 it still listed Deadman Danny as not yet
+   playable after his release, and the tool then ignored him in match data too. Valve now releases heroes one at a
+   time, so this will happen again. A hero therefore also counts as playable when
+   - he's seen in a real match on this computer ("match"), or
+   - he has HERO_PLAYED_MIN ranked or unranked games in the last HERO_PLAYED_DAYS days ("played").
+   A hero with no entry in the game data at all gets a placeholder name, so a match with him still works.
+   extra: { heroId: "match" | "played" }. Returns the sorted list; added heroes carry .added. */
+const HERO_PLAYED_MIN = 200, HERO_PLAYED_DAYS = 3, HERO_SEEN_KEEP_MS = 60 * 86400000;
+const validHeroId = id => Number.isInteger(id) && id > 0 && id < 1000;
+const releasedHero = h => !!(h && validHeroId(h.id) && h.name && h.player_selectable && !h.disabled);
+function heroPlaceholder(id, all) {
+  const h = (all || []).find(x => x && x.id === id && x.name);
+  return { ...(h || { id, images: {} }), name: h ? h.name : `New hero (#${id})` };
+}
+function heroList(all, extra = {}) {
+  const byId = new Map();
+  for (const h of all || []) if (releasedHero(h)) byId.set(h.id, h);
+  for (const [k, why] of Object.entries(extra || {})) {
+    const id = Number(k);
+    if (validHeroId(id) && !byId.has(id)) byId.set(id, { ...heroPlaceholder(id, all), added: why });
+  }
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+/* Heroes with enough recent games (from /v1/analytics/hero-stats rows: { hero_id, matches }). */
+function playedHeroIds(rows, min = HERO_PLAYED_MIN) {
+  return (Array.isArray(rows) ? rows : []).filter(r => r && validHeroId(Number(r.hero_id)) && Number(r.matches) >= min).map(r => Number(r.hero_id));
+}
+/* New heroes since the last visit, like itemChanges: { ids, news: { id: at } }, kept CHANGE_KEEP_MS. First visit only remembers. */
+function heroNews(ids, prevIds, kept = {}, now = Date.now()) {
+  const news = {};
+  for (const [id, at] of Object.entries(kept || {})) if (now - at < CHANGE_KEEP_MS) news[id] = at;
+  if (Array.isArray(prevIds) && prevIds.length) for (const id of ids) if (!prevIds.includes(id) && !news[id]) news[id] = now;
+  return { ids: [...ids], news };
+}
+/* Why the data service couldn't watch a match (v2.8.1). Before, every refusal other than 400/404/429 showed the same
+   "still in hero selection" guess. The service's code (read October 13) says what its answers mean:
+   - 500 "Failed to spectate match: "k_e…"": the game's own answer (Valve's CMsgClientToGCSpectateUserResponse);
+   - 503: Steam's match servers didn't answer the service in time (it waits 2 s, then tries 3 more times);
+   - 429: its limit of 6 new matches an hour per internet connection, with the seconds until the next one;
+   - 400 "cannot be live": the match started more than 4 hours ago.
+   Returns { reason, short, text, retry, wait (s) }. retry: a later try can work by itself (busy, not started yet). */
+const SPECTATE_REASONS = {
+  k_eNotInGame: { short: "The match hasn't started yet (or has ended)", retry: true,
+    text: "The game says this match isn't being played right now. Usually it's still in hero selection or loading; it can also mean the match has already ended." },
+  k_eTooBusy: { short: "The game's servers were too busy", retry: true, text: "The game's servers were too busy to let the data service watch this match." },
+  k_eServerFull: { short: "No room for another viewer", retry: true, text: "The game has no room for another viewer of this match right now." },
+  k_eRateLimited: { short: "The game asked the data service to slow down", retry: true, text: "The game is limiting how often the data service can watch matches." },
+  k_eInternalError: { short: "The game's servers had a problem", retry: true, text: "The game's servers had a problem answering the data service." },
+  Unknown: { short: "The game's servers had a problem", retry: true, text: "The game's servers had a problem answering the data service." },
+  k_eDisabled: { short: "Watching matches is switched off", retry: false,
+    text: "The game has switched off watching matches for now, so live updates can't start. Fill in your teams by hand (Setup), or try again later." },
+  k_eDisabledForGame: { short: "This match can't be watched", retry: false,
+    text: "The game doesn't allow this match to be watched, so live updates can't work for it. Fill in your teams by hand (Setup)." },
+  k_eInvalidClientVersion: { short: "The data service needs the latest game update", retry: false,
+    text: "The data service hasn't caught up with the latest game update yet, so it can't watch matches. That's on its side and is usually fixed within hours. Fill in your teams by hand meanwhile." }
+};
+function spectateFailure(status, body = "") {
+  let error = body;
+  try { const j = JSON.parse(body); if (j && j.error != null) error = j.error; } catch {}
+  const msg = typeof error === "string" ? error : "";
+  if (status === 429) {
+    const secs = Number(error?.next_request_in);
+    const mins = Number.isFinite(secs) && secs > 0 ? Math.max(1, Math.ceil(secs / 60)) : null;
+    return { reason: "limit", short: "This hour's match connections are used up", retry: false,
+      text: `The data service's limit of 6 new matches an hour (per internet connection) is used up. ${mins ? `The next one frees up in about ${mins} min.` : "Try again in a few minutes."}` };
+  }
+  if (status === 400 && /cannot be live/i.test(msg)) return { reason: "old", short: "That match started over 4 hours ago", retry: false,
+    text: "That match ID is from a match that started more than 4 hours ago, so it can't be live. Check the number in the bottom-right corner of your screen." };
+  if (status === 400) return { reason: "badid", short: "That isn't a match ID", retry: false, text: "That doesn't look like a match ID. It's the number in the bottom-right corner of your screen in game." };
+  if (status === 404) return { reason: "notfound", short: "No live match with that ID", retry: false, text: "No live match found with that ID. Check the number, or wait until the match has loaded." };
+  if (status === 503) return { reason: "steam", short: "Steam's match servers didn't answer in time", retry: true,
+    text: "Steam's match servers didn't answer the data service in time. That's common right after a game update or at busy times, and isn't a problem with your IDs." };
+  const code = (/spectate match:\s*"?([A-Za-z_]+)"?/i.exec(msg) || [])[1];
+  if (code) { const r = SPECTATE_REASONS[code] || SPECTATE_REASONS.Unknown; return { reason: code, short: r.short, text: r.text, retry: r.retry }; }
+  if (status >= 500) return { reason: "service" + status, short: "The data service had a problem", retry: true,
+    text: `The data service had a problem on its side (error ${status}).` };
+  return { reason: "http" + status, short: `The data service refused (error ${status})`, retry: false, text: `The data service refused the request (error ${status}).` };
 }
 /* Is version a newer than b? ("v2.7.10" > "v2.7.9" > "v2.7"; anything unreadable is never newer.) */
 function newerVersion(a, b) {
@@ -1620,7 +1708,10 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
 
 /* ---------- Setup pickers ---------- */
 function heroIcon(h) { const i = h.images || {}; return i.icon_image_small_webp || i.icon_image_small || i.icon_hero_card_webp || ""; }
-function itemIcon(it) { return it.shop_image_small_webp || it.image_webp || it.image || ""; }
+/* Item icons (v2.8.1): the game's shop pictures (m_strShopIconLarge in the game files), the same field the data service's
+   own website shows. v2.8 used the small shop picture first. Each item's picture comes from its own entry, so an
+   upgrade never borrows its part's picture. */
+function itemIcon(it) { return it.shop_image_webp || it.shop_image || it.shop_image_small_webp || it.shop_image_small || it.image_webp || it.image || ""; }
 function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 function img(src, cls) { const i = document.createElement("img"); i.alt = ""; i.src = src; i.loading = "lazy"; if (cls) i.className = cls; return i; }
 
@@ -1629,8 +1720,52 @@ function heroButton(h, cls, pressed, disabled, onClick) {
   b.className = "hero " + cls; b.type = "button";
   b.setAttribute("aria-pressed", pressed); b.disabled = disabled;
   const name = document.createElement("span"); name.textContent = h.name;
-  b.append(img(heroIcon(h)), name); b.onclick = onClick;
+  // A hero the game data has no picture for yet (a brand-new hero, v2.8.1) gets his first letter instead.
+  const icon = heroIcon(h);
+  if (icon) b.append(img(icon)); else { const n = document.createElement("span"); n.className = "noimg"; n.dataset.letter = (h.name.replace(/^New hero.*/, "?")[0] || "?").toUpperCase(); b.append(n); }
+  b.append(name);
+  const isNew = heroNewNote(h.id);
+  if (isNew) { const t = document.createElement("span"); t.className = "newtag"; t.textContent = "New"; b.append(t); b.title = isNew; }
+  b.onclick = onClick;
   return b;
+}
+/* A hero the match (or recent play) shows but the game data doesn't list as playable yet: add him now, remember him
+   for later visits, and redraw. Returns false only for an impossible hero number. */
+function ensureHero(id, why = "match") {
+  id = Number(id);
+  if (S.heroById[id]) return true;
+  if (!validHeroId(id)) return false;
+  const h = { ...heroPlaceholder(id, S.heroAll), added: why };
+  S.heroById[id] = h;
+  S.heroes = [...S.heroes, h].sort((a, b) => a.name.localeCompare(b.name));
+  (S.heroesAdded ||= []).push({ id, name: h.name, why });
+  if (why === "match") { const seen = store.get("heroesSeen") || {}; seen[id] = Date.now(); store.set("heroesSeen", seen); }
+  clearTimeout(S.heroRedraw); S.heroRedraw = setTimeout(() => { renderAll(); renderHeroNote(); }, 0);
+  return true;
+}
+function heroNewNote(id) {
+  const h = S.heroById[id]; if (!h) return null;
+  if (h.added) return h.added === "match" ? "New: seen in a match, though the game data doesn't list this hero yet" : "New: being played, though the game data doesn't list this hero yet";
+  const at = S.heroNews?.[id];
+  return at ? `New in a recent game update (first seen ${new Date(at).toLocaleDateString("en-CA", { month: "long", day: "numeric" })})` : null;
+}
+/* A line under the game-data status naming heroes added this way, so it's clear where they came from. */
+function renderHeroNote() {
+  const added = S.heroes.filter(h => h.added);
+  const el = $("heroNote"); if (!el) return;
+  el.hidden = !added.length;
+  el.textContent = added.length ? `Added from ${added.some(h => h.added === "match") ? "match data" : "recent games"}: ${added.map(h => h.name).join(", ")}. The game data doesn't list ${added.length > 1 ? "them" : "this hero"} as playable yet (it can lag behind a game update); recommendations use the same statistics as for every hero.` : "";
+}
+/* Heroes being played that the game data doesn't list yet (see heroList). One request, at most every 6 hours. */
+async function refreshPlayedHeroes() {
+  let c = store.get("heroesPlayed");
+  if (!c || Date.now() - c.at > 6 * 3600000) {
+    const from = Math.floor((Date.now() - HERO_PLAYED_DAYS * 86400000) / 3600000) * 3600;
+    try { c = { at: Date.now(), ids: playedHeroIds(await getJSON(`/v1/analytics/hero-stats?min_unix_timestamp=${from}`)) }; store.set("heroesPlayed", c); }
+    catch { return; }
+  }
+  // A hero the game data has switched off (disabled) isn't brought back by older games.
+  for (const id of c.ids || []) if (!S.heroById[id] && !(S.heroAll || []).some(h => h && h.id === id && h.disabled)) ensureHero(id, "played");
 }
 
 function renderHeroes() {
@@ -2687,9 +2822,23 @@ function resetMatchState() {
    overwrite a newer link. A second request for the same match while one is starting is ignored (it would
    use another of the 6 connections per hour). */
 let linkSeq = 0, linkStarting = null;
+/* One automatic retry after a temporary refusal (v2.8.1). { id, n: automatic tries so far for this match, at, timer }. */
+const LINK_RETRY = { s: 75, max: 2 };   // seconds to wait, automatic tries per match
+let linkRetry = null;
+function cancelLinkRetry() { if (linkRetry?.timer) clearTimeout(linkRetry.timer); if (linkRetry) { linkRetry.timer = null; linkRetry.at = null; } }
+function scheduleLinkRetry(id, opts) {
+  cancelLinkRetry();
+  linkRetry = { id, n: (linkRetry?.id === id ? linkRetry.n : 0) + 1, at: Date.now() + LINK_RETRY.s * 1000 };
+  linkRetry.timer = setTimeout(() => {
+    if (linkRetry?.id !== id) return;
+    linkRetry.timer = null; linkRetry.at = null;
+    $("matchId").value = id; linkMatch({ id, active: opts.active, auto: true });
+  }, LINK_RETRY.s * 1000);
+}
 async function linkMatch(opts = {}) {
   const id = opts.id || ($("matchId").value.match(/\d+/g) || []).join("");
   if (linkStarting === id) return;
+  cancelLinkRetry();
   LIVE.matchErr = null;
   if (id.length < 5) {
     LIVE.matchErr = { state: "warn", text: "No match ID typed yet." };
@@ -2722,7 +2871,7 @@ async function linkSteps(id, opts) {
     if (opts.active) {
       LIVE.rosterSrc = "active"; LIVE.firstRowAt = Date.now();
       for (const pl of opts.active.players || []) {
-        const h = Number(pl.hero_id); if (!S.heroById[h]) continue;
+        const h = Number(pl.hero_id); if (!ensureHero(h)) continue;   // a hero the game data doesn't list yet is added (v2.8.1)
         LIVE.roster.set(h, { team: pl.team, lane: null, nw: null, account: pl.account_id != null ? Number(pl.account_id) : null, items: [] });
       }
       applyRoster();
@@ -2744,12 +2893,20 @@ async function linkSteps(id, opts) {
       if (stale()) return;
       if (!res.ok) {
         const body = await res.text().catch(() => "");
+        if (stale()) return;
+        const fail = spectateFailure(res.status, body);
         const left = Math.max(0, SPECTATE_PER_HOUR - spectatesUsed());
-        if (res.status === 429) throw new Error("The data service says this hour's 6 match connections are used up. Try again in a few minutes.");
-        if (res.status === 400 && /cannot be live/i.test(body)) throw new Error("That match ID belongs to a match that has already finished. Check the number in the bottom-right corner of your screen.");
-        if (res.status === 400) throw new Error("That doesn't look like a match ID. It's the number in the bottom-right corner of your screen in game.");
-        if (res.status === 404) throw new Error("No live match found with that ID. Check the number, or wait until the match has loaded.");
-        throw new Error(`The game wouldn't let the data service watch this match yet. That usually means it's still in hero selection or loading. Wait until you're in the game, then press Connect. (Each try uses a connection: ${left} of ${SPECTATE_PER_HOUR} left this hour.)`);
+        // A temporary refusal is tried once more by itself after a pause (at most LINK_RETRY.max times per match, and
+        // never with the last connection of the hour). Pressing Connect still tries straight away.
+        const tries = linkRetry?.id === id ? linkRetry.n : 0;
+        const auto = fail.retry && tries < LINK_RETRY.max && left >= 2;
+        const at = new Date(Date.now() + LINK_RETRY.s * 1000).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
+        const next = auto ? ` The tool will try again by itself at about ${at} (that uses one of your ${left} connections left this hour), or press Connect to try now.`
+          : fail.retry ? ` Wait a minute or two, then press Connect. (Each try uses a connection: ${left} of ${SPECTATE_PER_HOUR} left this hour.)`
+          : fail.reason === "limit" ? "" : ` (${left} of ${SPECTATE_PER_HOUR} match connections left this hour.)`;
+        LIVE.spectateFails = [...(LIVE.spectateFails || []), { at: Date.now(), status: res.status, reason: fail.reason, auto }].slice(-6);
+        tlMark("refused: " + fail.reason);
+        throw Object.assign(new Error(fail.text + next), { short: fail.short, temporary: fail.retry, auto });
       }
       const url = (await res.json()).broadcast_url;
       if (stale()) return;
@@ -2764,8 +2921,12 @@ async function linkSteps(id, opts) {
     if (stale()) return;
     LIVE.connecting = false;
     const text = /Failed to fetch|NetworkError/.test(e.message) ? "Couldn't reach the data service. Check your internet connection." : e.message;
+    // The step shows the short reason, the message below it the whole explanation and what to do. A temporary
+    // problem is amber, one that won't go away by waiting is red.
+    const cls = e.temporary ? "warn" : "error";
     if (LIVE.applied) { liveStatus(text, "warn"); }        // teams from the Watch list stay; only live updates are off
-    else { LIVE.id = null; S.matchId = null; LIVE.matchErr = { state: "error", text }; liveStatus(text, "error"); saveMatch(); }
+    else { LIVE.id = null; S.matchId = null; LIVE.matchErr = { state: cls, text: e.short ? e.short + "." : text }; liveStatus(text, cls); saveMatch(); }
+    if (e.auto) scheduleLinkRetry(id, opts);
   }
   renderLive(); renderSources();
 }
@@ -2780,6 +2941,7 @@ function unlinkMatch(quiet) {
   clearTimeout(LIVE.soulsCheck);
   S.matchId = null;
   renderSources();
+  if (!quiet) cancelLinkRetry();
   if (!quiet) { liveStatus("Disconnected. Everything stays as it is; you can keep going by hand."); saveMatch(); updateSouls(true); tickClock(); }
   renderLive();
 }
@@ -3032,7 +3194,7 @@ function parseLiveItems(v) {
 let rosterTimer = null;
 function onRosterRow(r) {
   const hero = Number(r.hero);
-  if (!hero || !S.heroById[hero]) return;
+  if (!hero || !ensureHero(hero)) return;   // before v2.8.1 a hero missing from the game data was dropped here
   /* After a reconnect, the broadcast can replay the match from much earlier: in a recorded match the inventory went
      back through its whole history (everything gone, then the first purchases again) and the tool briefly suggested
      Tankbuster though it was owned. Rows older than what was already seen for this player are ignored. */
@@ -3263,6 +3425,8 @@ function logDiag() {
     d.timeline = LIVE.timeline?.length ? LIVE.timeline.map(([k, at]) => [k, Math.round((at - LIVE.timeline[0][1]) / 1000)]) : null;
     d.thin = LIVE.thin ?? null; d.thinRejected = LIVE.thinRejected || null; d.deathSamples = LIVE.deathSamples || null; d.deaths = (S.deaths || []).slice(0, 40);
     d.replayedRowsIgnored = LIVE.replayedRows || 0;
+    d.spectateFails = LIVE.spectateFails?.length ? LIVE.spectateFails.map(f => ({ status: f.status, reason: f.reason, auto: f.auto })) : null;
+    d.heroesFromMatch = S.heroesAdded?.length ? S.heroesAdded : null;   // heroes the game data didn't list yet (v2.8.1)
     d.schemaSummary = String(store.get("liveCols")?.summary || "").split("\n").filter(l => /^(Controller|Pawn) columns/.test(l)).join("\n").slice(0, 3000);   // column names only
     // Why the skill bracket is what it is (no account numbers): a saved Steam account, your rank, the lobby lookup.
     const accounts = [...(LIVE.roster?.values() || [])].filter(p => p.account > 0).length;
@@ -3910,7 +4074,9 @@ function renderBoard() {
 
   // Buy order
   const ol = $("orderList"); ol.replaceChildren();
-  if (empty) ol.innerHTML = `<p class="muted">No games found for this hero with these settings. Try "Last 30 days" or "All ranks" in Setup.</p>`;
+  if (empty) ol.innerHTML = heroNewNote(S.me)
+    ? `<p class="muted">No games found yet for ${esc(heroName(S.me))} with these settings. This hero is new, so games are still coming in: they usually take a few hours to reach the statistics after a release. Try "All ranks" in Setup, or check back later. Until then the tool shows no buy order for this hero rather than guess one.</p>`
+    : `<p class="muted">No games found for this hero with these settings. Try "Last 30 days" or "All ranks" in Setup.</p>`;
   order.forEach((st, i) => ol.append(i === 0 ? nextCard(st, souls) : rowEl(st, souls, i + 1)));
   renderEgg(); renderSkipped(); renderDead();
   $("orderNote").textContent = order.length > 1 ? `Then ${order.length - 1} more to work toward` : "";
@@ -4223,15 +4389,25 @@ async function init() {
   const carried = importCarriedSettings();
   try {
     const [heroes, items, patches] = await Promise.all([
-      getJSON("/v1/assets/heroes?only_active=true"),
+      getJSON("/v1/assets/heroes"),   // every hero, released or not (v2.8.1: see heroList)
       getJSON("/v1/assets/items"),
       getJSON("/v2/patches").catch(() => [])
     ]);
     // Everything about heroes and items comes from the game data at start-up: new, removed or changed heroes
     // and items, costs, stats and descriptions are picked up by themselves. Entries missing what the tool
     // needs are left out rather than guessed.
-    S.heroes = heroes.filter(h => h && h.id && h.name && h.player_selectable && !h.disabled).sort((a, b) => a.name.localeCompare(b.name));
+    // Heroes the game data doesn't list as playable yet but that were seen in a match here, or are being played a lot
+    // (remembered from the last check), are included too (v2.8.1).
+    S.heroAll = (Array.isArray(heroes) ? heroes : []).filter(h => h && validHeroId(h.id));
+    const seen = store.get("heroesSeen") || {}, extra = {};
+    for (const [id, at] of Object.entries(seen)) if (Date.now() - at < HERO_SEEN_KEEP_MS) extra[id] = "match";
+    const played = store.get("heroesPlayed");
+    for (const id of played?.ids || []) if (!extra[id] && !S.heroAll.some(h => h.id === id && h.disabled)) extra[id] = "played";
+    S.heroes = heroList(S.heroAll, extra);
     S.heroes.forEach(h => S.heroById[h.id] = h);
+    S.heroesAdded = S.heroes.filter(h => h.added).map(h => ({ id: h.id, name: h.name, why: h.added }));
+    const hn = heroNews(S.heroes.filter(h => !h.added).map(h => h.id), store.get("heroIds"), store.get("heroNews"));
+    S.heroNews = hn.news; store.set("heroIds", hn.ids); store.set("heroNews", hn.news);
     const all = items.filter(i => i.type === "upgrade");
     all.forEach(i => S.itemByClass[i.class_name] = i);
     S.items = all.filter(i => i.shopable && !i.disabled && i.cost > 0 && i.name && ["weapon", "spirit", "vitality"].includes(i.item_slot_type))
@@ -4298,6 +4474,7 @@ async function init() {
     renderSteam(); renderSources();
     liveStatus(S.steam ? "Ready. Press Find my match once you're in the game, or type the match ID." : "Start by saving your Steam account below, then press Find my match once you're in the game.");
     renderAll(); tickClock(); loadCurve();
+    renderHeroNote(); refreshPlayedHeroes();   // in the background; a failure changes nothing
     if (resume) recommend();
     if (S.resumeLink) linkMatch();   // reuses the saved connection, no new look-up needed
     else if (S.watch) watchTick();
@@ -4405,6 +4582,8 @@ function feedbackContext() {
   return [`Tool ${VERSION}${onWeb() ? " (web version)" : " (downloaded copy)"}, ${browser}`,
     S.me ? `Hero: ${heroName(S.me)}` : null, sec != null ? `Game time: ${mmss(sec)}` : null,
     LIVE.id ? "Linked to a live match" : "Not linked", order ? `Buy order: ${order}` : null,
+    // The data service's answers to recent connection attempts (v2.8.1): no IDs, just the reason and when.
+    LIVE.spectateFails?.length ? "Connection refusals: " + LIVE.spectateFails.map(f => `${f.reason} (${f.status}) at ${new Date(f.at).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}`).join(", ") : null,
     `Statistics: ${rankChoice().label}, ${timeWindow().label}`].filter(Boolean).join("\n");
 }
 function feedbackParts() {
@@ -4454,7 +4633,7 @@ $("clearAll").onclick = () => {
   S.enemies = []; S.lane = new Set(); S.owned = new Set(); S.clockStart = null; S.clockStartedOnce = false; S.soulOffset = 0; S.lastSouls = null;
   $("buildSearch").value = ""; renderBuildSearch();
   S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.flexManual = 0; S.skipped = {}; S.deaths = []; S.soulsRef = null; S.selected = null; S.tab = null; S.view = null; S.cache = {}; S.pending = []; S.windowFrom = null;
-  unlinkMatch(true); $("matchId").value = ""; liveDiag(""); liveStatus("Cleared for a new match. Press Find my match once you're in the game, or set things up by hand.");
+  unlinkMatch(true); cancelLinkRetry(); $("matchId").value = ""; liveDiag(""); liveStatus("Cleared for a new match. Press Find my match once you're in the game, or set things up by hand.");
   $("souls").value = 0; setPhase("lane");
   // Your rank and period choices stay (v2.7.4): they're picked before finding a match, not per match.
   S.rankWiden = 0; $("window").value = windowDefault(); renderRankNote();
