@@ -288,7 +288,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.8.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.8.2</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
@@ -501,10 +501,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.8.1";   // shown in the top bar and written into match records
+const VERSION = "v2.8.2";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.8.2", date: "October 13, 2026", items: [
+    "Upgrading an item you own is now valued for what it adds. Before, the tool counted the part you already owned twice, so \"buy a Tier 1, then upgrade it next\" came up too often early on. Upgrades still come first when they're a real power spike, or when your slots are full.",
+    "An upgrade's explanation now says that your item goes into it, and that the gain is what the upgrade adds beyond it."] },
   { v: "v2.8.1", date: "October 13, 2026", items: [
     "When a match can't be connected, the tool now says why, using the game's own answer: the match hasn't started yet, Steam's servers were busy, the match can't be watched, and so on. Before, every one of these showed the same \"still in hero selection\" message.",
     "If the problem is temporary, the tool tries again by itself after about a minute (at most twice, and never with your last connection of the hour). Pressing Connect still tries straight away.",
@@ -573,6 +576,10 @@ const TIMING_GAP = 0.015;    // a 1.5-point difference between stages counts as 
 const BASE_SLOTS = 9;
 const FLEX_SLOTS_MAX = 3;
 const MAX_ACTIVE = 4;
+/* Pair-based build fit (v2.8.2, see pairFit): computed and recorded, but not used yet (on: false). At half weight (w) it
+   changed the next buy at 54% of moments in replays of real matches: too big a change before the v2.9 backtest can
+   judge it. Replays and tests can switch it on. */
+const PAIR_FIT = { on: false, w: 0.5 };
 const POP_PRIOR = 0.002;     // popularity at this stage: weak evidence (at most +0.2 pts), breaks near-ties
 const RARE_STAGE_SHARE = 0.25;   // bought at this stage by under a quarter of the usual share -> "rarely bought this late"
 /* Items your hero rarely buys need stronger evidence. Few buyers means noisier numbers, the players who pick an
@@ -925,6 +932,44 @@ function buildFit(baseline, perAnchor) {
   return fit;
 }
 
+/* Build fit from item pairs (v2.8.2): /v1/analytics/item-permutation-stats with comb_size=2 counts, for every two
+   items, the players who bought both ([a, b] and [b, a] by purchase order; both are added up here). For an item you own
+   (A), each other item's win rate among players who also bought A is compared with how it does overall (whole-match
+   statistics), and the shared shift (owning more items usually means a longer or richer match) is removed, as in
+   buildFit. One request covers every item you own.
+   Checked on real data (October 13: 4 heroes, 8 anchors each, all ranks, 30 days) against the stage-by-stage method:
+   - same direction in 97% of the cases where both are confident; correlation 0.6 to 0.8;
+   - but whole-match pair numbers are smaller and move less with the stage numbers in the laning and mid stages (slope
+     0.15 to 0.4; about 0.7 late), because they don't know when the items were bought;
+   - counting only items bought AFTER A agreed much less (correlation 0.06 to 0.6), so both orders are used.
+   So pairs don't replace the stage method; they cover the items you own that it doesn't ask about (it asks only for
+   your three most expensive), counted at PAIR_FIT.w once switched on.
+   pairs: [{ item_ids: [a, b], wins, matches }]; whole: whole-match item rows; anchors: the items to cover. */
+function pairFit(whole, pairs, anchors) {
+  const want = new Set(anchors), sum = new Map();   // "a,b" (a an anchor) -> { wins, matches }
+  for (const p of pairs || []) {
+    const [a, b] = p.item_ids || [];
+    if (a == null || b == null || a === b) continue;
+    for (const [x, y] of [[a, b], [b, a]]) {
+      if (!want.has(x)) continue;
+      const k = x + "," + y, e = sum.get(k) || { anchor: x, item_id: y, wins: 0, matches: 0 };
+      e.wins += p.wins || 0; e.matches += p.matches || 0; sum.set(k, e);
+    }
+  }
+  const per = new Map();
+  for (const e of sum.values()) (per.get(e.anchor) || per.set(e.anchor, []).get(e.anchor)).push({ item_id: e.item_id, wins: e.wins, matches: e.matches });
+  const fit = buildFit(whole || [], [...per].map(([anchorId, rows]) => ({ anchorId, rows })));
+  for (const list of Object.values(fit)) for (const f of list) { f.src = "pair"; f.w = PAIR_FIT.w; }
+  return fit;
+}
+/* Add pair fits to a stage's fits, for anchors the stage method didn't ask about. */
+function mergeFits(stageFit, pairFits, stageAnchors) {
+  const out = {}, skip = new Set(stageAnchors);
+  for (const [id, list] of Object.entries(stageFit || {})) out[id] = list.slice();
+  for (const [id, list] of Object.entries(pairFits || {})) for (const f of list) if (!skip.has(f.anchorId)) (out[id] ||= []).push(f);
+  return out;
+}
+
 /* Counters: compare each item's win rate against each enemy with its normal win rate for this hero.
    Your hero's overall matchup against an enemy moves every item's win rate together (if you usually beat
    Haze, all items look good against Haze). That shared shift is measured across all items and removed,
@@ -993,8 +1038,10 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
     let fitScore = 0, fitZ = 0;
     for (const f of fits) {
       const fse = Math.abs(f.z) > 1e-9 ? Math.abs(f.lift / f.z) : 1;
-      fitScore += f.lift * trust(fse, TAU_FIT);   // signed: "pairs poorly" counts against, like "pairs well" counts for
-      if (f.z > fitZ) fitZ = f.z;
+      fitScore += (f.w ?? 1) * f.lift * trust(fse, TAU_FIT);   // signed: "pairs poorly" counts against, like "pairs well" counts for
+      // Pair fits (v2.8.2) count toward the value but don't make an item a "build" pick on their own: their large samples
+      // make many small effects look certain.
+      if (f.src !== "pair" && f.z > fitZ) fitZ = f.z;
     }
     const cost = effectiveCost(it, owned, itemByClass);
     out.push({ item: it, base: b, pb, vs, score, bestZ: best, counterZ, fits, fitScore, fitZ, cost, affordable: cost <= souls, pop: b.players });
@@ -1213,7 +1260,7 @@ function groupRecs(scored) {
   weak.forEach(s => used.add(s.item.id));
   // Standard picks: best value at this stage (net-worth adjusted), popularity only breaks ties. Skips items
   // that clearly clash with what you own, and items whose time has passed.
-  const core = scored.filter(s => !used.has(s.item.id) && !(s.fits || []).some(f => f.z <= -STRONG_Z) && !(s.mechScore < 0) && !(s.timing?.factor < 0.4) && !s.timing?.outOfStage)
+  const core = scored.filter(s => !used.has(s.item.id) && !(s.fits || []).some(f => f.src !== "pair" && f.z <= -STRONG_Z) && !(s.mechScore < 0) && !(s.timing?.factor < 0.4) && !s.timing?.outOfStage)
     .sort((a, b) => (val(b) - val(a)) || (b.pop - a.pop)).slice(0, 8);
   return { counters: strong.slice(0, 10), build, situational: weak, core };
 }
@@ -1268,7 +1315,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
      slots). When none is free, the least valuable item you'd hold is sold for half its price, but only if the
      new item is clearly better (SELL_GAIN); otherwise the purchase can't happen in this sequence. */
   const evaluate = seq => {
-    const have = new Set(owned); let spent = 0; const T = [], costs = [], sells = [], blocked = new Set();
+    const have = new Set(owned); let spent = 0; const T = [], costs = [], sells = [], blocked = new Set(), usedUp = [];
     // What you'd be holding: owned items, then planned ones. rate = value per second, seq = index in the plan.
     const hold = new Map([...owned].map(id => [id, { rate: ownedRates.get(id) ?? GENERIC_PER_SOUL * (itemById[id]?.cost || 0) * 0.5, item: itemById[id], seq: -1 }]));
     seq.forEach((x, i) => {
@@ -1299,12 +1346,18 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
       spent += c - refund; costs.push(c);
       // +1 s per place: when several items are affordable at once, the bigger value goes first.
       T.push(Math.max(0, spent - souls) / r + T.length);
-      for (const id of used) { hold.delete(id); have.delete(id); }
+      for (const id of used) { const h = hold.get(id); if (h) usedUp.push({ seq: h.seq, rate: h.rate, at: i }); hold.delete(id); have.delete(id); }
       for (const cls of it.component_items || []) { const p = itemByClass[cls]; if (p) have.delete(p.id); }
       have.add(it.id); hold.set(it.id, { rate: rateOf(x), item: it, seq: i });
     });
     let v = 0;
     for (const s of sells) if (s && s.seq < 0) { const Ts = T[sells.indexOf(s)]; v -= s.rate * W(Ts, horizon); }   // an owned item sold: its value from then on is lost
+    /* An item you own that an upgrade uses up stops giving its own value from then on, like a sold one (v2.8.2). Up to
+       v2.8.1 this was missing: upgrading an owned Tier 1 counted the Tier 2's whole value (its stats priced at the full
+       1,600) for only the 800 paid, so the part's value was counted twice and "buy a Tier 1, upgrade it next" won too
+       often (Extended Magazine then Titanic Magazine, Sprint Boots then Trophy Collector in two v2.8 records). A part
+       the plan itself buys first already stopped counting at the upgrade (below). */
+    for (const u of usedUp) if (u.seq < 0 && Number.isFinite(T[u.at])) v -= u.rate * W(T[u.at], horizon);
     seq.forEach((x, i) => {
       if (blocked.has(i)) return;
       let end = horizon;
@@ -1399,7 +1452,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
       st.upgrade = { from: fromId };
       st.why = `Upgrade ${fromName} (${cost.toLocaleString()} more)`;
       if (!st.plan) st.plan = owned.has(fromId)
-        ? `Upgrade your ${fromName}: you pay only the ${cost.toLocaleString()} difference. Planned now because the extra stats are worth more than the other items these souls could buy.`
+        ? `Upgrade your ${fromName}: you pay only the ${cost.toLocaleString()} difference, and your ${fromName} goes into it, so what you gain is what ${x.s.item.name} adds beyond it. Planned now because that gain is worth more than the other items these souls could buy.`
         : `Then upgrade ${fromName}: you pay only the ${cost.toLocaleString()} difference.`;
     }
     if (x.covered) {
@@ -2163,22 +2216,6 @@ function fetchPhase(entry, q) {
   return entry.promise;
 }
 function currentPlan() { return phasePlan(clockSeconds(), S.phase); }
-/* Item-pair statistics (planned for v2.8.1): the data service's documentation doesn't describe their format, so once per
-   hero and visit the tool asks for them and keeps the shape of the answer (field names, a few rows of item numbers and
-   counts, nothing personal) in the match record. Only while recording; the answer isn't used yet. */
-function probePairs() {
-  if (!LOG.on || !S.me || S.pairProbe?.hero === S.me) return;
-  const [minB, maxB] = rankBounds();
-  const q = new URLSearchParams({ hero_ids: S.me, comb_size: 2, min_matches: 500, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: timeWindow().from });
-  const P = S.pairProbe = { hero: S.me, at: Date.now() };
-  getJSON(`/v1/analytics/item-permutation-stats?${q}`).then(rows => {
-    const list = Array.isArray(rows) ? rows : Array.isArray(rows?.data) ? rows.data : null;
-    P.type = Array.isArray(rows) ? "array" : typeof rows;
-    P.count = list ? list.length : null;
-    P.keys = list?.[0] && typeof list[0] === "object" ? Object.keys(list[0]).slice(0, 20) : (rows && typeof rows === "object" ? Object.keys(rows).slice(0, 20) : null);
-    P.sample = list ? JSON.stringify(list.slice(0, 3)).slice(0, 600) : String(JSON.stringify(rows)).slice(0, 300);
-  }, e => { P.error = String(e?.message || e).slice(0, 160); });
-}
 /* Lane counters (v2.8): for each lane opponent, items bought in the laning stage by players who laned against that
    hero (the data service's same_lane_filter). One request per lane opponent; kept for the match (and its rank and
    period). Optional: until they arrive, or if they fail, the whole-match numbers are used. */
@@ -2237,24 +2274,55 @@ function ensureFlow() {
   }).catch(() => { if (S.flow === f) { f.loading = false; f.failedAt = Date.now(); } });
 }
 
-/* Build fit data, per stage, for your three most expensive items */
+/* Build fit data, per stage, for your three most expensive items; from v2.8.2 also item pairs for the rest (pairFit). */
 let fitTimer = null;
 function scheduleFit() { clearTimeout(fitTimer); fitTimer = setTimeout(refreshFit, 500); }
 async function refreshFit() {
-  const anchors = [...S.owned].map(id => S.itemById[id]).filter(Boolean).sort((a, b) => b.cost - a.cost).slice(0, 3).map(i => i.id);
+  const owned = [...S.owned].map(id => S.itemById[id]).filter(Boolean).sort((a, b) => b.cost - a.cost);
+  const anchors = owned.slice(0, 3).map(i => i.id), others = owned.slice(3).map(i => i.id);
   const akey = anchors.join(",");
+  const P = others.length && PAIR_FIT.on ? pairsNow() : null;
+  const psig = others.join(",") + (P ? "|" + P.key : "");
   for (const { phase } of currentPlan()) {
     const entry = S.cache[dataKey(phase)];
-    if (!entry || !entry.ready || entry.fit?.akey === akey || entry.fitPending === akey) continue;
-    if (!anchors.length) { entry.fit = { akey, perAnchor: [] }; entry.fitMap = {}; continue; }
-    entry.fitPending = akey;
-    const rows = await Promise.all(anchors.map(a => getJSON(`/v1/analytics/item-stats?${entry.q}&include_item_ids=${a}`).catch(() => [])));
-    if (entry.fitPending !== akey) continue;
-    entry.fitPending = null;
-    entry.fit = { akey, perAnchor: anchors.map((a, i) => ({ anchorId: a, rows: rows[i] })) };
-    entry.fitMap = buildFit(entry.baseline, entry.fit.perAnchor);   // computed once, not on every render
+    if (!entry || !entry.ready) continue;
+    if (entry.fit?.akey !== akey && entry.fitPending !== akey) {
+      if (!anchors.length) { entry.fit = { akey, perAnchor: [] }; entry.stageFit = {}; }
+      else {
+        entry.fitPending = akey;
+        const rows = await Promise.all(anchors.map(a => getJSON(`/v1/analytics/item-stats?${entry.q}&include_item_ids=${a}`).catch(() => [])));
+        if (entry.fitPending !== akey) continue;
+        entry.fitPending = null;
+        entry.fit = { akey, perAnchor: anchors.map((a, i) => ({ anchorId: a, rows: rows[i] })) };
+        entry.stageFit = buildFit(entry.baseline, entry.fit.perAnchor);   // computed once, not on every render
+      }
+      entry.pairSig = null;
+    }
+    if (entry.fit?.akey !== akey || entry.pairSig === psig) continue;
+    entry.pairSig = psig;
+    entry.fitMap = mergeFits(entry.stageFit, P ? pairFit(P.whole, P.pairs, others) : {}, anchors);
     renderResults();
   }
+}
+/* Item pairs for your hero, rank and period (v2.8.2): one request for the pairs and one for whole-match item statistics,
+   kept for the session. Only needed once you own more than three items. Until they arrive, or if they fail, the fit
+   uses your three most expensive items as before. */
+const pairKey = () => { const [minB, maxB] = rankBounds(); return [S.me, minB, maxB, timeWindow().from].join("|"); };
+function pairsNow() {
+  const k = pairKey(), have = (S.pairStats ||= {})[k];
+  if (have?.ready) return have;
+  if (have && !(have.failedAt && Date.now() - have.failedAt > 60000)) return null;   // loading, or failed a moment ago
+  const [minB, maxB] = rankBounds();
+  const e = S.pairStats[k] = { key: k };
+  const base = { hero_ids: S.me, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: timeWindow().from };
+  Promise.all([
+    getJSON(`/v1/analytics/item-permutation-stats?${new URLSearchParams({ ...base, comb_size: 2, min_matches: MIN_GAMES })}`),
+    getJSON(`/v1/analytics/item-stats?${new URLSearchParams({ ...base, min_matches: 1, corrupted_items: "exclude" })}`)
+  ]).then(([pairs, whole]) => {
+    if (!Array.isArray(pairs) || !Array.isArray(whole)) throw new Error("unexpected format");
+    Object.assign(e, { pairs, whole, ready: true, at: Date.now() }); scheduleFit();
+  }).catch(err => { e.failedAt = Date.now(); e.error = String(err?.message || err).slice(0, 120); });
+  return null;
 }
 
 /* ---------- Match clock ---------- */
@@ -3421,7 +3489,7 @@ function logDiag() {
     d.streams = LIVE.streamInfo || {}; d.soulsUnfiltered = !!LIVE.soulsUnfiltered; d.soulsHeroesSeen = LIVE.soulsHeroesSeen || null; d.soulsGaveUp = !!LIVE.soulsGaveUp;
     d.soulsVia = LIVE.soulsVia || null; d.soulsEventsFailed = LIVE.soulsEventsFailed || null; d.soulsEventRows = LIVE.soulsEvents ? { ok: LIVE.soulsEvents.ok, bad: LIVE.soulsEvents.bad, all: LIVE.soulsEvents.rows, sample: LIVE.soulsEvents.sample } : null; d.soulsLinkFailed = LIVE.soulsLinkFailed || null; d.soulsLinkRows = LIVE.soulsLink ? { ok: LIVE.soulsLink.ok, bad: LIVE.soulsLink.bad } : null; d.rawSoulsAny = LIVE.rawSoulsAny || null;
     d.entities = LIVE.ctlOf ? Object.fromEntries(Object.entries(LIVE.ctlOf).map(([h, x]) => [h, x.ent])) : null;   // hero -> entity number, to read the probe
-    d.pairProbe = S.pairProbe ? { type: S.pairProbe.type ?? null, count: S.pairProbe.count ?? null, keys: S.pairProbe.keys ?? null, sample: S.pairProbe.sample ?? null, error: S.pairProbe.error ?? null } : null;
+    { const ps = S.pairStats?.[pairKey()]; d.pairs = ps ? { ready: !!ps.ready, rows: ps.pairs?.length ?? null, error: ps.error || null } : null; }
     d.timeline = LIVE.timeline?.length ? LIVE.timeline.map(([k, at]) => [k, Math.round((at - LIVE.timeline[0][1]) / 1000)]) : null;
     d.thin = LIVE.thin ?? null; d.thinRejected = LIVE.thinRejected || null; d.deathSamples = LIVE.deathSamples || null; d.deaths = (S.deaths || []).slice(0, 40);
     d.replayedRowsIgnored = LIVE.replayedRows || 0;
@@ -3482,6 +3550,16 @@ function logSnapshot(view, ready) {
       const e = p.entry, st = r.stats[e.key]; if (!st || !e.fit?.perAnchor?.length) continue;
       st.fit ||= {};
       if (!st.fit[e.fit.akey]) st.fit[e.fit.akey] = e.fit.perAnchor.map(a => [a.anchorId, (a.rows || []).map(x => [x.item_id, x.wins, x.matches, x.players, Math.round(x.avg_buy_time_s || 0)])]);
+    }
+    // Item pairs (v2.8.2): the whole-match item statistics once, and the pair rows for each item you own, so replays and
+    // the v2.9 backtest can measure what using them would change.
+    const PS = S.pairStats?.[pairKey()];
+    if (PS?.ready) {
+      const own = [...S.owned].filter(id => S.itemById[id]);   // every item you own, so later versions can test using pairs for all of them
+      if (own.length) {
+        if (!r.pairs || r.pairs.key !== PS.key) r.pairs = { key: PS.key, whole: PS.whole.map(x => [x.item_id, x.wins, x.matches, x.players]), anchors: {} };
+        for (const a of own) if (!r.pairs.anchors[a]) r.pairs.anchors[a] = PS.pairs.filter(x => (x.item_ids || []).includes(a)).map(x => [x.item_ids[0], x.item_ids[1], x.wins, x.matches]);
+      }
     }
     if (!r.flow && S.flow?.ready && S.flow.rawNodes) r.flow = { key: S.flow.key, matchLen: S.flow.matchLen,
       nodes: S.flow.rawNodes.map(n => [n.column, n.item_id, n.wins, n.losses, n.matches, n.players, n.adjusted_win_rate, Math.round(n.avg_net_worth_at_buy || 0)]) };
@@ -3745,10 +3823,10 @@ function detailLines(s, kind, souls, entry) {
     }
     for (const v of (s.vs || []).filter(v => v.z <= -WEAK_Z)) lines.push(`Does worse than usual against <b>${esc(heroName(v.enemyId))}</b> (<span class="down">${pts(v.lift)} pts</span>).`);
     for (const f of (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift)) {
-      lines.push(`Pairs well with <b>${esc(itemName(f.anchorId))}</b>: <span class="up">${pts(f.lift)} pts</span> beyond the usual boost from owning it (${f.n.toLocaleString()} games).`);
+      lines.push(`Pairs well with <b>${esc(itemName(f.anchorId))}</b>: <span class="up">${pts(f.lift)} pts</span> beyond the usual boost from owning it (${f.n.toLocaleString()} games${f.src === "pair" ? ", players who bought both at any point; counted at half weight" : ""}).`);
     }
     for (const f of (s.fits || []).filter(f => f.z <= -WEAK_Z)) {
-      lines.push(`Pairs poorly with <b>${esc(itemName(f.anchorId))}</b> (<span class="down">${pts(f.lift)} pts</span>). It may overlap with what that item already does.`);
+      lines.push(`Pairs poorly with <b>${esc(itemName(f.anchorId))}</b> (<span class="down">${pts(f.lift)} pts</span>${f.src === "pair" ? ", players who bought both at any point" : ""}). It may overlap with what that item already does.`);
     }
     for (const w of s.mechWhy || []) lines.push(`<b>Live match:</b> ${esc(w)}.`);
     for (const w of s.mechWarn || []) lines.push(`<span class="down">${esc(w)}</span>, so this is ranked lower.`);
@@ -3952,7 +4030,8 @@ function renderResultsInner() {
   }
   const ready = plan.map(p => ({ ...p, entry: S.cache[dataKey(p.phase)] })).filter(p => p.entry && (p.entry.ready || p.entry.baseReady));
   for (const p of ready) if (p.phase === "lane" && p.entry.ready) p.laneRows = laneRowsNow();
-  probePairs();
+  // Item pairs: fetched while recording (kept in the match record for testing), or when they're used (PAIR_FIT.on).
+  if (S.me && S.owned.size && (LOG.on || PAIR_FIT.on)) pairsNow();
   const prelim = ready.some(p => !p.entry.ready);
   if (!ready.length) {
     // Never blank the board while new data loads: keep the last buy order and say it's updating.
