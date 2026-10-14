@@ -294,7 +294,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.8.4</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.8.5</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
@@ -508,10 +508,15 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.8.4";   // shown in the top bar and written into match records
+const VERSION = "v2.8.5";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.8.5", date: "October 14, 2026", items: [
+    "Fixed: when an enemy changed hero at the start of a match, the tool could keep the old hero on the enemy team and leave a real one out, so counters were worked out against the wrong heroes. It now keeps the six players really in the match.",
+    "Spirit Resilience is no longer suggested as an answer to enemy crowd control: it only gives spirit resist (the game's internal name for it was misread). Cheat Death no longer counts as healing reduction, and Nullification Burst now does.",
+    "Gun and spirit items are no longer marked down just for going against your build. Real data from 16 heroes showed no such effect on average, so how well an item fits your build is now measured from the items you own. Expect some gun items on spirit heroes, and the other way round, when the numbers support them.",
+    "Once you own one way out of crowd control (Unstoppable, Indomitable, Dispel Magic or Divine Barrier), the others count for much less: players who own two of them do worse. The item details say so."] },
   { v: "v2.8.4", date: "October 13, 2026", items: [
     "If the live data stops (the broadcast ends or pauses), your souls now carry on from your last live number and keep growing with the match clock. Before, they froze or jumped to the average player's number, so the buy order stopped changing late in the match.",
     "Item effects are now read from the game's own stat names. Healbane and other healing reduction items are only tied to enemy items that really heal (not small regen like Monster Rounds or Sprint Boots), weighted by how much the enemies spent on healing.",
@@ -610,7 +615,6 @@ const POP_REF = 0.10, POP_FLOOR = 0.002, POP_RARE_W = 0.01;
    counter, or what the live match needs), and favourable general statistics alone don't count. Read from the
    data for each hero, so a hero that really does buy cheap items late isn't affected. */
 const OUT_STAGE_SHARE = 0.10;
-const BUILD_W = 0.012;       // an item pulling against a clear gun or spirit build loses up to 1.2 pts (modest: a strong counter still wins)
 const TEAM_STACK = 0.6;      // each teammate already applying a debuff (healing or resist reduction) shrinks the need: 1/(1 + 0.6 x teammates)
 const SELL_REFUND = 0.5;     // selling returns half the price (deadlock.wiki/Items; a full refund only inside the shop right after buying)
 const SELL_GAIN = 1.4;       // sell an item for a slot only if the new item is worth at least 1.4x as much to you...
@@ -1201,32 +1205,16 @@ function timingFor(flowItem, sec, invest, matchLen, { tier = null, tierShare = n
 }
 const pts = x => (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(1);
 
-/* ---------- Build direction ----------
-   Gun (-1) to spirit (+1), from the item's own data: its shop slot, and for vitality items its stats (fire
-   rate, ammo, weapon damage vs spirit power, cooldowns...). Your build's lean is the cost-weighted lean of
-   what you own, starting from your hero's usual purchases (flow data) so it works before you own much. */
-function itemOrientation(it) {
-  let o = it.item_slot_type === "weapon" ? -1 : it.item_slot_type === "spirit" ? 1 : 0;
-  if (o === 0) {
-    const t = Object.entries(it.properties || {}).filter(([, v]) => v && v.value != null && parseFloat(v.value) !== 0)
-      .map(([k, v]) => `${k} ${v.label || ""}`).join(" ").toLowerCase();
-    const gun = /weapon ?damage|weaponpower|fire ?rate|bullet ?(damage|lifesteal|velocity)|ammo|clip ?size|headshot|reload/.test(t);
-    const spi = /spirit ?power|techpower|spirit ?damage|cooldown|ability ?(charges|range|duration)|spirit ?lifesteal|abilitylifesteal|techrange|techduration/.test(t);
-    o = (spi ? 0.5 : 0) - (gun ? 0.5 : 0);
-  }
-  return o;
-}
-function buildLean(ownedItems, heroLean) {
-  let num = (heroLean || 0) * 3000, den = 3000, invested = 0;
-  for (const it of ownedItems) { const o = itemOrientation(it), c = it.cost || 0; num += o * c; den += Math.abs(o) * c; invested += c; }
-  return { lean: num / den, invested };
-}
-/* How strongly an item pulls against a clear build direction (0 = fits or neutral, up to 1). */
-function buildMismatch(it, lean) {
-  const o = itemOrientation(it);
-  if (Math.abs(lean) < 0.35 || Math.abs(o) < 0.5 || Math.sign(o) === Math.sign(lean)) return 0;
-  return Math.abs(lean) * Math.abs(o);
-}
+/* ---------- Build direction (removed in v2.8.5) ----------
+   From v2.5 to v2.8.4 every item had a gun-to-spirit direction (its shop slot), your build had a lean (your items, starting
+   from your hero's usual purchases), and an item against a clear lean lost up to 1.2 pts plus up to 80% of its stats value:
+   up to about 2.7 pts for a 3,200-soul item. It was a reasoned rule, never measured. Measured on real data in October 2026
+   (16 heroes, all ranks: how gun and spirit items do for players who already own a gun or a spirit item), owning one type
+   makes no difference on average to how the next items of that type do (-0.05 ± 0.01 pts). It differs by hero (McGinnis
+   +0.3 and Ivy +1.0 pts for staying with one type; Abrams -1.0 and Celeste -0.5 for mixing), which the measured build fit
+   for your own items already picks up (buildFit). The blanket rule pushed every hero toward its most common build: before
+   you bought anything, your hero's usual purchases alone made the other type's items count less (McGinnis: 78% spirit
+   purchases, so gun items lost value from the first second of a match). */
 
 /* One value for every item, in win-rate points: its stage value (net-worth adjusted), how it does
    against this enemy team, how it fits your items, and what the live match needs. */
@@ -1234,6 +1222,8 @@ function itemValue(s) {
   let adj = s.adj || 0, ctr = s.score || 0, fit = s.fitScore || 0;   // signed and shrunk by their uncertainty
   // A healing amplifier with nothing to amplify (see ampSupport): its buyers' good results don't apply to you.
   if (s.amp?.none) { if (adj > 0) adj = 0; if (ctr > 0) ctr = 0; if (fit > 0) fit = 0; }
+  // Does the same job as an item you own (see overlapOf): only part of its favourable numbers apply to you.
+  if (s.overlap) { const f = s.overlap.factor; if (adj > 0) adj *= f; if (ctr > 0) ctr *= f; if (fit > 0) fit *= f; }
   // Out of its stage: only a convincing, match-specific reason counts in its favour (a strong counter or build
   // fit, or what the live match needs); good general numbers count half, weak ones not at all.
   if (s.timing?.outOfStage) {
@@ -1241,7 +1231,7 @@ function itemValue(s) {
     if (ctr > 0 && !((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z)) ctr = 0;
     if (fit > 0 && !((s.fitZ || 0) >= STRONG_Z)) fit = 0;
   }
-  return adj + ctr + fit + (s.mechScore || 0) + (s.popPrior ?? POP_PRIOR) * (s.popShare || 0) - BUILD_W * (s.mismatch || 0) - (s.rarePenalty || 0);
+  return adj + ctr + fit + (s.mechScore || 0) + (s.popPrior ?? POP_PRIOR) * (s.popShare || 0) - (s.rarePenalty || 0);
 }
 /* Out of its stage with nothing that makes it worth it in this match: no strong counter or build-fit evidence and
    nothing the live match needs. Such items aren't planned on their own (only as the first step toward an upgrade
@@ -1286,9 +1276,9 @@ function ampSupport(it, ownedItems, abilities) {
   }
   return { sources, none: !sources.length, noLifesteal: tr.noLifesteal };
 }
-/* What an item's basic stats are worth per second: the same per soul for every item (a neutral starting point),
-   less when they pull against your build direction (spirit power does little for a gun build). */
-const statsValue = s => GENERIC_PER_SOUL * (s.item.cost || 0) * (1 - 0.8 * (s.mismatch || 0));
+/* What an item's basic stats are worth per second: the same per soul for every item (a neutral starting point). How
+   well they suit what you own is measured, not assumed (build fit; the gun/spirit rule was removed in v2.8.5). */
+const statsValue = s => GENERIC_PER_SOUL * (s.item.cost || 0);
 /* How much an item loses for being rarely bought by your hero at this stage (see POP_REF). share: its buyers
    compared with the most popular item's at this stage. */
 function rarityPenalty(share) {
@@ -1579,8 +1569,12 @@ function itemTags(it) {
   const num = k => { const e = P.find(([key]) => key === k); return e ? parseFloat(e[1].value) : 0; };
   const has = re => P.some(([k]) => re.test(k));
   const props = P.map(([k, v]) => `${k} ${v.label || ""} ${v.postfix || ""}`);
-  const t = [it.class_name || "", it.name || "", itemText(it), ...props].join(" ").toLowerCase();   // the old word rules
   const d = fullText(it);   // the description alone
+  /* The game's internal item names count only for an item with no description (v2.8.5). They are old and can describe
+     an earlier design: Spirit Resilience is "upgrade_tech_purge", so up to v2.8.4 it counted as removing debuffs and
+     was offered as an answer to enemy crowd control (McGinnis, October 14), though it only gives spirit resist.
+     Indomitable has no description, so its internal name ("auto_cleanse") is still what says what it does. */
+  const t = [d.trim() ? "" : it.class_name || "", it.name || "", itemText(it), ...props].join(" ").toLowerCase();   // the old word rules
   const tags = new Set();
   if (keyed) {
     // Reducing, stealing or ignoring the enemy's resist all answer it (Armor Piercer "ignoring their Bullet Resistance",
@@ -1588,7 +1582,11 @@ function itemTags(it) {
     const bRed = num("BulletArmorReduction") || num("BulletResistReduction"), sRed = num("MagicResistReduction") || num("TechArmorDamageReduction") || num("TechResistReduction");
     if (bRed || /reduc\w*\s+(\w+\s+){0,3}bullet\s*resist|(steal|ignor)\w*[^.]{0,30}\bbullet\b[^.]{0,20}resist/.test(d)) tags.add("bulletShred");
     if (sRed || /reduc\w*\s+(\w+\s+){0,3}spirit\s*resist|(steal|ignor)\w*[^.]{0,30}\bspirit\b[^.]{0,20}resist/.test(d)) tags.add("spiritShred");
-    if (has(/^HealAmp(Receive|Regen)PenaltyPercent$/)) tags.add("antiheal");
+    // A healing penalty counts unless it's on you: the description says you receive less healing, or (with no
+    // description) the stats are about your own death immunity, like Cheat Death's (v2.8.5). Stated plainly in the
+    // description counts too (Nullification Burst "prevents ... healing effects on enemies").
+    const onOthers = d.trim() ? !/\byou\b[^.]{0,20}\b(receive|get|take)\b[^.]{0,20}(less|reduced)\s+heal|\byour\s+(incoming\s+)?heal\w*\s+(is\s+)?reduc/.test(d) : !has(/immunity/i);
+    if ((has(/^HealAmp(Receive|Regen)PenaltyPercent$/) && onOthers) || /(prevents?|reduces?|blocks?)\s+(\w+\s+){0,4}healing[^.]{0,20}\b(on|of)\s+enem/.test(d)) tags.add("antiheal");
     else { const h = healTraits(it); if (h.heals || h.lifesteal) tags.add("sustain"); }
     // A resist number equal to the item's own reduction is the same debuff shown twice (Mystic Vulnerability lists
     // "Spirit Resist -8" and "Spirit Resist 8"), not resist for you.
@@ -1618,6 +1616,30 @@ function itemTags(it) {
   // there's little match left to collect it (e.g. Golden Goose Egg: "grows the longer you hold onto it").
   if (/(souls?|gold)\s*per\s*min|perminute|per\s*minute|the longer you (hold|keep|own)|grows?\b[^.]{0,30}(over time|longer|each minute)|accru|permanent(ly)?\s+(stack|buff|bonus|gain|stat)|stacks? (are|is) permanent|gain[^.]{0,20}permanent/.test(t)) tags.add("invest");
   return tags;
+}
+
+/* Which heroes are really in the match (v2.8.5). A team has six players, but the live data can show more: on October 14
+   two of McGinnis's opponents changed hero at the start (Celeste and Paige became Silver and Haze), and the old heroes
+   stayed on the list at 600 souls with no items for the whole match. The tool took the first six enemies it had seen,
+   so it worked out counters against Celeste and Paige instead of Silver and Haze, and treated Paige as a lane opponent.
+   When a team shows more than six heroes, the six kept are the ones still being reported (a hero whose rows stopped more
+   than 30 s of game time before the others' is a leftover), then those with more souls, then more items, then the one
+   seen later (a replacement arrives after what it replaced). Teams of six or fewer are never changed, and you are
+   always kept. roster: Map hero -> { team, nw, items }; ticks: hero -> last game tick seen. Returns the heroes left out,
+   each with whether it's a stale leftover (safe to remove) or just ranked seventh. */
+const ROSTER_STALE_TICKS = 64 * 30;
+function rosterExtras(roster, ticks = {}, me = null, perTeam = 6) {
+  const all = [...roster], latest = Math.max(0, ...all.map(([h]) => ticks[h] || 0));
+  const stale = h => latest > 0 && (ticks[h] || 0) < latest - ROSTER_STALE_TICKS;
+  const out = [];
+  for (const team of new Set(all.map(([, p]) => String(p.team)))) {
+    const members = all.map(([h, p], i) => ({ h, p, i })).filter(x => String(x.p.team) === team);
+    if (members.length <= perTeam) continue;
+    members.sort((a, b) => (b.h === me) - (a.h === me) || stale(a.h) - stale(b.h) || (Number(b.p.nw) || 0) - (Number(a.p.nw) || 0)
+      || (b.p.items || []).length - (a.p.items || []).length || b.i - a.i);
+    for (const x of members.slice(perTeam)) out.push({ hero: x.h, stale: stale(x.h) });
+  }
+  return out;
 }
 
 /* How much each enemy matters right now: their matchup threat times how far ahead they are. */
@@ -1661,6 +1683,33 @@ function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyW
 }
 
 const MECH_W = 0.03;   // a full-strength answer counts like a +3 point win-rate edge
+/* How much of this match's need is left when you already own an item that answers it: a second way out of crowd control
+   adds little while the first is ready, resist still adds up, and a second debuff on the enemy (healing or resist
+   reduction) is assumed to add little. That last part is an assumption: real item pairs show no general overlap for
+   those debuffs (v2.8.5), so only the need is reduced, not the item's general value; v2.9's backtest will check it.
+   Used for what the match needs (mechNeeds) and, for ways out of crowd control, an item's general value (overlapOf). */
+const OWN_LEFT = { antiheal: 0.25, cleanse: 0.3, bulletShred: 0.3, spiritShred: 0.3, bulletRes: 0.7, spiritRes: 0.7 };
+/* Items that do the same job as one you own (v2.8.5): ways out of crowd control. Measured on real item pairs (16 heroes,
+   all ranks, October 2026): players who own two of Unstoppable, Indomitable and Dispel Magic do 1 to 2.6 points worse
+   than with either item and another item of the same price, for 13 or 14 of 15 to 16 heroes (Divine Barrier with them:
+   0.4 to 1.5 points worse). So once you own one, only OWN_LEFT.cleanse of another one's favourable general value counts:
+   its statistics come mostly from players who didn't have one. Up to v2.8.4 only the part answering this match's enemies
+   was reduced, so after Indomitable the tool still put Unstoppable first on its general numbers (McGinnis, October 14).
+   The same measurement found no such overlap for other jobs, so they aren't reduced: a second healing reduction (+0.1
+   points), bullet resist reduction (0.0), spirit resist reduction (+0.65: they stack well), spirit resist (0.0); extra
+   bullet resist has mild diminishing returns (−0.4), as the match needs already allow for.
+   Only items that free you from stuns or debuffs count (their description says so, or they have none, like Indomitable):
+   Magic Carpet's immunity to slows while flying is an escape, and it pairs well with these. An item that also deals
+   damage or crowd-controls keeps its value, and an item's own parts don't count (buying it replaces them).
+   Returns null, or { factor, tag, with }. */
+const freesYou = it => { const d = fullText(it); return !d.trim() || /\bstun|silence|debuff|negative\s+(status\s+)?effects|purge|cleans/.test(d); };
+function overlapOf(it, ownedItems, tagsOf, itemByClass = {}) {
+  const job = x => tagsOf(x).has("cleanse") && freesYou(x);
+  if (!job(it) || tagsOf(it).has("cc") || Object.entries(it.properties || {}).some(([k, v]) => v && parseFloat(v.value) && /damage|dps|^dot/i.test(k) && !/reduction|threshold|vsnonheroes|minimum/i.test(k))) return null;
+  const parts = new Set((it.component_items || []).map(c => itemByClass[c]?.id).filter(Boolean));
+  const mine = ownedItems.find(o => o.id !== it.id && !parts.has(o.id) && job(o));
+  return mine ? { factor: OWN_LEFT.cleanse, tag: "cleanse", with: mine.name } : null;
+}
 const sat = x => 1 - Math.exp(-x);   // more of a threat helps less and less
 
 /* How strongly each kind of answer is needed, with the reasons. */
@@ -1669,10 +1718,9 @@ function mechNeeds(P, heroName) {
   const sum = list => list.reduce((a, x) => a + x.w, 0);
   const needs = {};
   // An answer you already own covers most of the need (debuffs like healing reduction don't stack).
-  const own = { antiheal: 0.25, cleanse: 0.3, bulletShred: 0.3, spiritShred: 0.3, bulletRes: 0.7, spiritRes: 0.7 };
   const add = (tag, strength, why) => {
     const mine = P.myHas?.get(tag);
-    if (mine) { strength *= own[tag] ?? 1; why += `; you already have ${TAG_NAMES[tag]} (${mine})`; }
+    if (mine) { strength *= OWN_LEFT[tag] ?? 1; why += `; you already have ${TAG_NAMES[tag]} (${mine})`; }
     if (strength > 0.05) needs[tag] = { strength: Math.min(1, strength), why };
   };
   // Debuffs on the enemy (healing and resist reduction) are shared: teammates who already apply one cover part
@@ -1787,12 +1835,11 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     s.adj = fi ? ready.reduce((a, p) => a + (p.w / wsum) * (fi.cols[colOf(p.phase)]?.lift ?? 0), 0) : 0;
     s.timing = timingFor(fi, sec, tagsOf(s.item).has("invest"), fl?.matchLen, { tier: s.item.item_tier, tierShare: fl?.tierShare });
   }
-  // Build direction: gun vs spirit, from what you own and your hero's usual purchases.
   const ownedItems = [...owned].map(id => itemById[id]).filter(Boolean);
-  const lean = buildLean(ownedItems, fl?.lean ? fl.lean.spirit - fl.lean.weapon : 0);
-  for (const s of merged) s.mismatch = buildMismatch(s.item, lean.lean);
   // Healing amplifiers: is there anything to amplify? (Your items and your hero's abilities; v2.8.3.)
   for (const s of merged) s.amp = ampSupport(s.item, ownedItems, abilities);
+  // Items that do the same job as one you own (v2.8.5).
+  for (const s of merged) s.overlap = overlapOf(s.item, ownedItems, tagsOf, itemByClass);
   // Match-aware layer: only with live items for the players in this match.
   let match = null;
   if (roster && roster.has(me)) {
@@ -1831,7 +1878,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     const n = cols.reduce((a, x) => a + x.n, 0);
     const adj = n ? cols.reduce((a, x) => a + x.lift * x.n, 0) / n : 0;
     const invest = tagsOf(it).has("invest") ? timingFor(fi, sec, true, fl?.matchLen).factor : 1;
-    const g = statsValue({ item: it, mismatch: buildMismatch(it, lean.lean) });
+    const g = statsValue({ item: it });
     const answers = needsNoOwn ? Math.max(0, mechFor(it, needsNoOwn, match.P, tagsOf).score) : 0;
     ownedRates.set(it.id, Math.max(0.5 * g, g + adj + (ownCtr.get(it.id) || 0) + answers) * invest);
   }
@@ -1844,7 +1891,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const order = buildOrder(groups, souls, owned, itemByClass, { prev: prevPlan, scoredById, rate: incomeRate(curve, sec), horizon: planHorizon(sec, fl?.matchLen),
     covered, slotCap, activeCap: MAX_ACTIVE, ownedRates, itemById, exclude: skipped,
     nwNow: Math.max(souls + spentOn(owned, itemById), netWorthAt(curve, sec) || 0) });
-  return { order, groups, scoredById, merged, match, lean, ownedRates };
+  return { order, groups, scoredById, merged, match, ownedRates };
 }
 
 /* ---------- Setup pickers ---------- */
@@ -3185,7 +3232,7 @@ function unlinkMatch(quiet) {
   Object.assign(LIVE, { streams: {}, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
     itemsOk: false, itemsChecked: false, idSeen: 0, idKnown: 0, idSamples: [], knownSet: null, rawItemSample: "", rawSoulsSample: "", soulsRows: 0, invSig: "", souls: null, nw: null, meHow: null,
     laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
-    connecting: false, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
+    connecting: false, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
   clearTimeout(LIVE.soulsCheck);
   S.matchId = null;
   renderSources();
@@ -3504,6 +3551,13 @@ function onRosterRow(r) {
   else LIVE.rosterSrc = "broadcast";
   const prev = target.get(hero) || {};
   const items = parseLiveItems(r.items);
+  // A player whose hero changed (a swap at the start of the match) keeps the same player entity: the old hero is
+  // removed at once, so it can't stay on the team list (v2.8.5; see rosterExtras).
+  if (r.ent != null) {
+    const ent = Number(r.ent), was = (LIVE.entHero ||= {})[ent];
+    if (was != null && was !== hero && target.has(was)) { target.delete(was); (LIVE.swapped ||= []).push([was, hero]); logEvent("swap", { from: was, to: hero }); }
+    LIVE.entHero[ent] = hero;
+  }
   target.set(hero, { team: r.team, lane: r.lane ?? prev.lane, nw: r.nw ?? prev.nw,
     account: accountFromSteam(r.steam) ?? prev.account ?? null, items: items ?? prev.items ?? [] });
   if (target === LIVE.pendingRoster && (target.size >= 12 || now - LIVE.pendingSince > 20000)) {
@@ -3537,7 +3591,8 @@ function onSoulsRow(r) {
 function identifyMe() {
   const fullRoster = LIVE.roster.size >= 12 || Date.now() - LIVE.firstRowAt > 20000;
   if (S.steam && (LIVE.cols?.steam || LIVE.rosterSrc === "active")) {
-    const hit = [...LIVE.roster].find(([, p]) => p.account === S.steam.accountId);
+    // The most recently reported hero with your account: if you changed hero at the start, the old one can linger (v2.8.5).
+    const hit = [...LIVE.roster].filter(([, p]) => p.account === S.steam.accountId).sort(([a], [b]) => ((LIVE.heroTick || {})[b] || 0) - ((LIVE.heroTick || {})[a] || 0))[0];
     if (hit) return { hero: hit[0], how: "steam" };
     if (!fullRoster) return { wait: true };
     return { error: `Your Steam account (${S.steam.name || S.steam.accountId}) isn't in this match. Check the match ID, or the saved Steam account.` };
@@ -3566,8 +3621,13 @@ function applyRoster() {
   // A different match than last time: start its items, sold list, holds and clock fresh. Done only now,
   // when the new match has actually delivered data, so a failed or mistyped link never wipes anything.
   if (!LIVE.applied && S.lastMatchId && String(S.lastMatchId) !== String(LIVE.id)) resetMatchState();
+  // More than six heroes on a team: leftovers from a hero change are removed, and only the six really playing count
+  // (see rosterExtras). Up to v2.8.4 the first six seen were used.
+  const extras = rosterExtras(LIVE.roster, LIVE.heroTick || {}, S.me);
+  for (const x of extras) if (x.stale && LIVE.roster.has(x.hero)) { LIVE.roster.delete(x.hero); (LIVE.leftovers ||= []).push(x.hero); logEvent("leftover", { hero: x.hero }); }
+  const leftOut = new Set(extras.filter(x => !x.stale).map(x => x.hero));
   const mine = LIVE.roster.get(S.me);
-  const enemies = [...LIVE.roster].filter(([, p]) => String(p.team) !== String(mine.team)).map(([h]) => h).slice(0, 6);
+  const enemies = [...LIVE.roster].filter(([h, p]) => String(p.team) !== String(mine.team) && !leftOut.has(h)).map(([h]) => h).slice(0, 6);
   if (!LIVE.applied && enemies.length < 6 && Date.now() - LIVE.firstRowAt < 15000) {
     renderLive();
     setTimeout(applyRoster, 2000);
@@ -3593,7 +3653,7 @@ function applyRoster() {
   // something it shows changed, not on every update.
   if (meChanged || teamChanged || laneChanged || !LIVE.applied) renderAll(); else renderSources();
   if (meChanged || teamChanged || laneChanged) { logEnsure(); logEvent("roster", { me: S.me, enemies: S.enemies, lane: [...S.lane],
-    allies: [...LIVE.roster].filter(([h, p]) => h !== S.me && String(p.team) === String(mine.team)).map(([h]) => h), from: LIVE.rosterSrc || "broadcast" }); }
+    allies: [...LIVE.roster].filter(([h, p]) => h !== S.me && String(p.team) === String(mine.team) && !leftOut.has(h)).map(([h]) => h), from: LIVE.rosterSrc || "broadcast" }); }
   const inv = [...LIVE.roster].map(([h, p]) => h + ":" + (p.items || []).join(".")).sort().join("|");
   const invChanged = inv !== LIVE.invSig;
   LIVE.invSig = inv;
@@ -3715,6 +3775,7 @@ function logDiag() {
     d.timeline = LIVE.timeline?.length ? LIVE.timeline.map(([k, at]) => [k, Math.round((at - LIVE.timeline[0][1]) / 1000)]) : null;
     d.thin = LIVE.thin ?? null; d.thinRejected = LIVE.thinRejected || null; d.deathSamples = LIVE.deathSamples || null; d.deaths = (S.deaths || []).slice(0, 40);
     d.replayedRowsIgnored = LIVE.replayedRows || 0;
+    if (LIVE.swapped?.length || LIVE.leftovers?.length) d.heroChanges = { swapped: LIVE.swapped || [], leftovers: LIVE.leftovers || [] };   // v2.8.5
     d.matchEnd = { how: LIVE.endHow || null, endsWithoutGameOver: LIVE.endChecks || 0, gameOver: LIVE.gameOver || null, gameOverStream: !!LIVE.cols?.evGameOver };   // v2.8.3
     d.spectateFails = LIVE.spectateFails?.length ? LIVE.spectateFails.map(f => ({ status: f.status, reason: f.reason, auto: f.auto })) : null;
     d.heroesFromMatch = S.heroesAdded?.length ? S.heroesAdded : null;   // heroes the game data didn't list yet (v2.8.1)
@@ -4151,7 +4212,7 @@ function renderDetail(entry, souls, labelText) {
   if ((s.rarePenalty || 0) >= 0.003) warns.push([`Few ${heroName(S.me)} players buy it at this stage (${Math.max(0.1, Math.round((s.popShare || 0) * 1000) / 10)}% as many as the most popular item), so it needs a strong reason`, null]);
   if (s.amp?.none) warns.push([`Nothing to amplify: ${it.name} works with healing you apply${s.amp.noLifesteal ? " (abilities or items that heal, not lifesteal or regen)" : " (lifesteal, or abilities and items that heal)"}. Your hero's abilities don't heal and you own nothing that does, so only its basic stats count and it isn't planned.`, null]);
   else if (lacksReason(s)) warns.push(["Out of its stage, and nothing in this match calls for it, so it isn't planned", null]);
-  if (s.mismatch > 0 && S.view?.lean) warns.push([`Goes against your build: you're building ${S.view.lean.lean > 0 ? "spirit" : "gun"} damage and this is a ${itemOrientation(it) > 0 ? "spirit" : "gun"} item`, null]);
+  if (s.overlap) warns.push([`Does the same job as ${s.overlap.with}, which you own (${TAG_NAMES[s.overlap.tag]}): only ${Math.round(s.overlap.factor * 100)}% of its usual advantage counts`, null]);
   if (entry.sell) warns.push([`Needs a free slot: sell ${entry.sell.item?.name || "an item"} first (you get back ${entry.sell.refund.toLocaleString()} souls)`, null]);
   const std = (kind === "core" || kind === "part") && s.base ? [[`Win rate when bought now (${s.base.players.toLocaleString()} players)`, pct(s.pb)]] : [];
   // Why now: the plan's reason for this step, and timing.
@@ -4191,7 +4252,7 @@ function renderDetail(entry, souls, labelText) {
   detailLines(s, kind, souls, entry).forEach(h => { const li = document.createElement("li"); li.innerHTML = h; ul.append(li); });
   info.append(ul);
   const about = document.createElement("span");
-  about.textContent = "How it's worked out: each item's value at this stage uses win rates adjusted for how far ahead buyers were when they bought it (players who are ahead buy expensive items sooner and win more anyway), compared with other items of the same tier, because the players who can afford pricier items early are the ones already winning. Items your hero's players rarely buy at this stage need a strong reason, and so do items out of their usual stage (cheap items late, the most expensive ones early). Counter numbers compare each item against each enemy with its normal win rate, remove your hero's general matchup (the middle value across all items), and count against the item where it does worse; an item only counts as a counter when the whole enemy team's numbers together are convincing, or one enemy's by a wide margin. Real per-enemy differences are small (about half a point in match records), so they need many games to count; the clearest counters come from what the enemies have actually built in the live match. Timing compares the item's adjusted win rate when bought at different stages; items that build value the longer you own them are worth less the later they're bought. The buy order then plans your next purchases for the most value over the rest of the match: value per soul, how long you'd need to save at your usual income, and parts that count toward upgrades. It never suggests an item that's already inside something you own (except as a marked step toward a different upgrade), keeps within your item slots (9, plus one for each enemy Walker your team destroys, up to 3; at most 4 active items), and suggests selling only when the new item is clearly worth more than what you'd sell (you get half its price back). Items that pull against your gun or spirit direction count a little less, and items players stop buying at this point of a match count less late. All of this is observational data: strong hints, not proof.";
+  about.textContent = "How it's worked out: each item's value at this stage uses win rates adjusted for how far ahead buyers were when they bought it (players who are ahead buy expensive items sooner and win more anyway), compared with other items of the same tier, because the players who can afford pricier items early are the ones already winning. Items your hero's players rarely buy at this stage need a strong reason, and so do items out of their usual stage (cheap items late, the most expensive ones early). Counter numbers compare each item against each enemy with its normal win rate, remove your hero's general matchup (the middle value across all items), and count against the item where it does worse; an item only counts as a counter when the whole enemy team's numbers together are convincing, or one enemy's by a wide margin. Real per-enemy differences are small (about half a point in match records), so they need many games to count; the clearest counters come from what the enemies have actually built in the live match. Timing compares the item's adjusted win rate when bought at different stages; items that build value the longer you own them are worth less the later they're bought. The buy order then plans your next purchases for the most value over the rest of the match: value per soul, how long you'd need to save at your usual income, and parts that count toward upgrades. It never suggests an item that's already inside something you own (except as a marked step toward a different upgrade), keeps within your item slots (9, plus one for each enemy Walker your team destroys, up to 3; at most 4 active items), and suggests selling only when the new item is clearly worth more than what you'd sell (you get half its price back). Items that do the same job as one you own (a second way out of crowd control) count only part of their usual value, and items players stop buying at this point of a match count less late. All of this is observational data: strong hints, not proof.";
   const lab = document.createElement("span"); lab.textContent = labelText;
   const st = document.createElement("span"); st.textContent = $("status").textContent;
   info.append(about, lab, st);
@@ -4286,7 +4347,7 @@ function renderResultsInner() {
   const fl = S.flow?.ready ? S.flow : null;
   const slotsNow = slotInfo();
   const skipped = skippedNow();
-  const { order, groups, scoredById, match, lean, ownedRates } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
+  const { order, groups, scoredById, match, ownedRates } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
     prog: S.prog, owned: S.owned, souls, lane: S.lane, threatW, fed, fl, sec, curve: S.curve, slotCap: slotsNow.cap, skipped, prevOrder: S.prevOrder,
     roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me) });
 
@@ -4306,7 +4367,7 @@ function renderResultsInner() {
     + `items bought during ${ready.map(p => PHASE_NAMES[p.phase].toLowerCase()).join(" and ")}${ready.length > 1 ? " (blended)" : ""}. `
     + (fl ? "Item values are adjusted for how far ahead buyers were. " : "")
     + `Biggest single sample: ${biggest.toLocaleString()} games. Fetched ${e0.fetchedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}.`;
-  S.view = { souls, order, groups, scoredById, label, threat, match, empty: !e0.baseline.length, lean, slots: slotsNow, at: Date.now(), prelim, ownedRates };
+  S.view = { souls, order, groups, scoredById, label, threat, match, empty: !e0.baseline.length, slots: slotsNow, at: Date.now(), prelim, ownedRates };
   renderBoard();
   scheduleFit();
   logSnapshot(S.view, ready);
