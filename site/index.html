@@ -113,7 +113,13 @@
   @media (prefers-reduced-motion: reduce) { .steps li[data-state="busy"] .dot { animation: none; } }
   .next-line { border-left: 3px solid var(--line); padding: 2px 0 2px 8px; }
   .next-line.ok { border-color: var(--good); } .next-line.warn { border-color: var(--warn); } .next-line.error { border-color: var(--bad); }
-  #steamResults { display: grid; gap: 4px; max-width: 520px; }
+  #steamResults { display: grid; gap: 4px; max-width: 560px; }
+  .acct { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+  .acct-pic { width: 36px; height: 36px; border-radius: 5px; object-fit: cover; background: var(--line); }
+  .acct-link { display: block; overflow-wrap: anywhere; }
+  .acct-act { display: flex; gap: 6px; align-items: center; }
+  .acct-act .btn { white-space: nowrap; }
+  @media (max-width: 480px) { .acct { grid-template-columns: 36px minmax(0, 1fr); } .acct-act { grid-column: 2; } }
   #summary .muted { font-weight: 400; }
   .group-inline { display: inline-flex; align-items: center; gap: 6px; }
   #clockTime { font: 700 20px/1 var(--display); font-variant-numeric: tabular-nums; min-width: 48px; text-align: right; }
@@ -288,7 +294,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.8.2</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.8.3</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
@@ -308,12 +314,13 @@
       <div class="field" id="steamEdit">
         <label for="steamInput">Your Steam account</label>
         <div class="rowflex">
-          <input id="steamInput" type="search" autocomplete="off" placeholder="Steam name, profile link or Steam ID">
+          <input id="steamInput" type="search" autocomplete="off" placeholder="Steam profile link, Steam ID or display name">
           <button id="findSteam" class="btn" type="button">Save</button>
         </div>
       </div>
       <div class="rowflex" id="steamSaved" hidden>
         <span class="small">Steam account: <b id="steamName"></b></span>
+        <a id="steamOpen" class="btn tiny" target="_blank" rel="noopener" href="#">Open profile</a>
         <button id="steamChange" class="btn tiny" type="button">Change</button>
       </div>
       <div id="steamResults"></div>
@@ -379,7 +386,7 @@
           <label for="rankRange">Statistics from</label>
           <select id="rankRange">
             <option value="auto">Automatic: this match's lobby, or your own rank</option>
-            <option value="all">All ranks (most data)</option>
+            <option value="all">All ranks (most games, least precise)</option>
           </select>
           <label for="window">Matches from</label>
           <select id="window">
@@ -501,10 +508,15 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.8.2";   // shown in the top bar and written into match records
+const VERSION = "v2.8.3";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.8.3", date: "October 13, 2026", items: [
+    "Steam profile links with a custom name (steamcommunity.com/id/…) no longer list players with look-alike names. If the tool can't match the link directly, it asks for your display name and then picks the account with your link. Each result shows its profile link, with an Open profile button to check.",
+    "A short break in Valve's broadcast no longer ends the match in the tool. It reconnects by itself, and only the game's own game-over message (or a broadcast that stops for good) ends the live link.",
+    "Healing Booster and Healing Tempo are only suggested when you have healing for them to boost: a healing item, or a hero ability that heals.",
+    "\"All ranks\" now explains that it's the least precise choice, and why \"Automatic\" fits your games better."] },
   { v: "v2.8.2", date: "October 13, 2026", items: [
     "Upgrading an item you own is now valued for what it adds. Before, the tool counted the part you already owned twice, so \"buy a Tier 1, then upgrade it next\" came up too often early on. Upgrades still come first when they're a real power spike, or when your slots are full.",
     "An upgrade's explanation now says that your item goes into it, and that the gain is what the upgrade adds beyond it."] },
@@ -634,7 +646,7 @@ async function getJSON(path) {
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(API + path, { signal: ctrl.signal });
-    if (!res.ok) throw new Error(`The data service answered with code ${res.status} for ${path.split("?")[0]}`);
+    if (!res.ok) throw Object.assign(new Error(`The data service answered with code ${res.status} for ${path.split("?")[0]}`), { status: res.status });
     return await res.json();
   } catch (e) {
     if (e.name === "AbortError") throw new Error(`The data service didn't answer within ${REQUEST_TIMEOUT_MS / 1000} s (${path.split("?")[0]})`);
@@ -1216,6 +1228,8 @@ function buildMismatch(it, lean) {
    against this enemy team, how it fits your items, and what the live match needs. */
 function itemValue(s) {
   let adj = s.adj || 0, ctr = s.score || 0, fit = s.fitScore || 0;   // signed and shrunk by their uncertainty
+  // A healing amplifier with nothing to amplify (see ampSupport): its buyers' good results don't apply to you.
+  if (s.amp?.none) { if (adj > 0) adj = 0; if (ctr > 0) ctr = 0; if (fit > 0) fit = 0; }
   // Out of its stage: only a convincing, match-specific reason counts in its favour (a strong counter or build
   // fit, or what the live match needs); good general numbers count half, weak ones not at all.
   if (s.timing?.outOfStage) {
@@ -1229,10 +1243,44 @@ function itemValue(s) {
    nothing the live match needs. Such items aren't planned on their own (only as the first step toward an upgrade
    the plan wants), because a cheap item bought late takes a slot and souls from what you'll really need. */
 function lacksReason(s) {
+  if (s.amp?.none) return true;   // nothing to amplify: never planned on its own (v2.8.3)
   if (!s.timing?.outOfStage) return false;
   const strongCtr = ((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z) && (s.score || 0) > 0;
   const strongFit = (s.fitZ || 0) >= STRONG_Z && (s.fitScore || 0) > 0;
   return !(strongCtr || strongFit || (s.mechScore || 0) > 0.005);
+}
+/* Healing amplifiers (v2.8.3). Some items only do much when you heal: Healing Booster makes your healing stronger, and
+   Healing Tempo's fire rate and move speed bonus triggers when you heal yourself or an ally ("not on innate regen or
+   passive Bullet/Spirit Lifesteal", its own text says). Their statistics come from the players who buy them, who
+   mostly have something to amplify; a hero with nothing to amplify gets only the item's basic stats. Up to v2.8.2 the
+   tool didn't check, so Healing Tempo was suggested to a Venator with no healing at all (30:02, October 13).
+   Everything here is read from the game data (stat names and descriptions of items and of your hero's abilities). */
+const HEAL_KEY = /heal(?!th)|^(TotalHealthRegen|ExternalBonusHealthRegen|HealthRegenDuration|HealingPerSecond)$/i;
+const LIFESTEAL_KEY = /life\s*steal|healthsteal/i;
+function fullText(it) {
+  return Object.values(it.description || {}).map(x => String(x || "")).join(" ").replace(/<svg[\s\S]*?<\/svg>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").toLowerCase();
+}
+function healTraits(it) {
+  const keys = Object.entries(it.properties || {}).filter(([, v]) => v && v.value != null && parseFloat(v.value) !== 0).map(([k]) => k);
+  const t = fullText(it);
+  const amp = keys.some(k => /^HealAmp(Cast|Regen|Receive)Percent$/i.test(k)) || /applying\s+heal|effectiveness of your\s+healing/.test(t);
+  const heals = keys.some(k => HEAL_KEY.test(k) && !/amp|penalty|minimumheal|threshold/i.test(k))
+    || /\bheals?\s+(you|yourself|allies|nearby|for)\b|heal yourself|provides?\s+healing|restores?\s+\w*\s*health|(increases?|grants?)\s+(\w+\s+)?health\s+regen/.test(t);
+  const lifesteal = keys.some(k => LIFESTEAL_KEY.test(k) && !/penalty/i.test(k));
+  return { amp, heals: heals && !amp, lifesteal, noLifesteal: /does not apply[^.]*lifesteal/.test(t) };
+}
+/* For an amplifier: what you have that it amplifies (items you own and your hero's abilities). null if it isn't one. */
+function ampSupport(it, ownedItems, abilities) {
+  const tr = healTraits(it);
+  if (!tr.amp) return null;
+  const sources = [];
+  for (const o of [...ownedItems, ...abilities]) {
+    if (!o || o.id === it.id) continue;
+    const t = healTraits(o);
+    if (t.amp) continue;
+    if (t.heals || (t.lifesteal && !tr.noLifesteal)) sources.push(o.name);
+  }
+  return { sources, none: !sources.length, noLifesteal: tr.noLifesteal };
 }
 /* What an item's basic stats are worth per second: the same per soul for every item (a neutral starting point),
    less when they pull against your build direction (spirit power does little for a gun build). */
@@ -1679,7 +1727,7 @@ const tagsOf = it => { let t = TAG_CACHE.get(it.id); if (!t) { t = itemTags(it);
    souls, lane (Set of lane opponents), threatW (enemy weights), fed, fl (stage data or null), sec (game time),
    curve (net worth curve), slotCap, skipped (Set), prevOrder (the previous plan), roster (live players, or null),
    me (your hero), heroName (function). */
-function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, lane, threatW, fed, fl, sec, curve, slotCap, skipped, prevOrder, roster, me, heroName }) {
+function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, lane, threatW, fed, fl, sec, curve, slotCap, skipped, prevOrder, roster, me, heroName, abilities = [] }) {
   const wsum = ready.reduce((a, p) => a + p.w, 0);
   // Items already inside something you own (Sprint Boots inside Enduring Speed...) aren't recommended again.
   const covered = coveredBy(owned, prog || { parts: new Map() });
@@ -1705,6 +1753,8 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const ownedItems = [...owned].map(id => itemById[id]).filter(Boolean);
   const lean = buildLean(ownedItems, fl?.lean ? fl.lean.spirit - fl.lean.weapon : 0);
   for (const s of merged) s.mismatch = buildMismatch(s.item, lean.lean);
+  // Healing amplifiers: is there anything to amplify? (Your items and your hero's abilities; v2.8.3.)
+  for (const s of merged) s.amp = ampSupport(s.item, ownedItems, abilities);
   // Match-aware layer: only with live items for the players in this match.
   let match = null;
   if (roster && roster.has(me)) {
@@ -1760,6 +1810,11 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
 }
 
 /* ---------- Setup pickers ---------- */
+/* Your hero's four abilities from the game data (for what they do, e.g. whether they heal). Empty if unknown. */
+function heroAbilities(heroId) {
+  const h = S.heroById[heroId]; if (!h || !h.items) return [];
+  return Object.entries(h.items).filter(([slot]) => /^signature\d$/.test(slot)).map(([, cls]) => S.abilityByClass?.[cls]).filter(Boolean);
+}
 function heroIcon(h) { const i = h.images || {}; return i.icon_image_small_webp || i.icon_image_small || i.icon_hero_card_webp || ""; }
 /* Item icons (v2.8.1): the game's shop pictures (m_strShopIconLarge in the game files), the same field the data service's
    own website shows. v2.8 used the small shop picture first. Each item's picture comes from its own entry, so an
@@ -2068,7 +2123,7 @@ function renderRankNote() {
     lobby: `Using this match's lobby: average ${rankName(c.centre)}, from the latest ranked match of ${lob?.n} of ${lob?.total} players (players without a recent ranked match aren't counted). Statistics from ${rangeLabel(c.lo, c.hi)}.`,
     mine: `Using your own rank, ${rankName(c.centre)}, from your latest ranked match` + (LIVE.id ? (lob ? ` (too few players in this lobby have a known rank: ${lob.n} of ${lob.total})` : " (this lobby's rank isn't known yet)") : " (link a match to use its lobby instead)") + `. Statistics from ${rangeLabel(c.lo, c.hi)}.`,
     none: "No rank known yet, so statistics come from all ranks. Save your Steam account or link a match to narrow them down.",
-    all: "Statistics from every rank: the most games, but the least specific to your lobbies.",
+    all: "Statistics from every rank: the most games, but the least specific to your lobbies." + allRanksHint(),
     tier: `Statistics from matches where the lobby averaged ${c.label.replace(/ lobbies.*/, "")}${S.rankWiden ? `, widened to ${rangeLabel(c.lo, c.hi)} because there were few games at that rank` : ""}.`
   }[c.src];
   $("rankNote").textContent = t + (S.ranksSource === "fallback" ? " (Rank names couldn't be loaded, so tiers are numbered.)" : "");
@@ -2089,7 +2144,17 @@ function syncStatControls() {
   const c = rankChoice(), win = timeWindow();
   const note = $("liveStatNote");
   if (note) note.textContent = `Using ${c.label}, ${win.label}.`
-    + (c.src === "none" ? " The rank narrows once your Steam account or the match's lobby is known." : "");
+    + (c.src === "none" ? " The rank narrows once your Steam account or the match's lobby is known." : "") + (c.src === "all" ? allRanksHint() : "");
+}
+/* "All ranks" mixes beginners and experts (v2.8.3). Items experienced players favour then look better than they are at
+   your rank: in a recorded Seven match (lobby about rank 50), Extra Health was 0.9 points above the average early item
+   across all ranks and 3.4 points below it in lobbies like his, and the build leaned on such items. So when your rank
+   or the lobby's is known, the note says so and points to Automatic. */
+function allRanksHint() {
+  const lob = LIVE.id && LIVE.lobby && LIVE.lobby.n >= LOBBY_MIN_RANKED ? LIVE.lobby : null;
+  const c = lob ? lob.avg : S.myRank?.badge > 0 ? S.myRank.badge : null;
+  return c == null ? " Items that experienced players favour can look better across all ranks than they are at a given rank."
+    : ` ${lob ? "This match's lobby averages" : "Your rank is"} ${rankName(Math.round(c))}: items that experienced players favour can look better across all ranks than they are there, so "Automatic" usually fits your games better.`;
 }
 /* Something changed what the bracket should be: start narrow again and refetch what depends on it. */
 function rankChanged() {
@@ -2467,6 +2532,7 @@ const LIVE_FRESH_MS = 45000;
 const STEAM64_BASE = 76561197960265728n;
 const LIVE_REQ_PER_MIN = 12;          // stay well under the API's 20 per minute
 const RETRY_DELAYS = [10, 20, 40, 60, 60, 60];   // seconds; then give up
+const LIVE_QUIET = { ms: 90000 };   // a live stream with no bytes at all for this long (the service sends a keep-alive every 15 s) is reconnected
 
 /* The latest message: what's happening now, or what to do next. Shown under the status steps. */
 function liveStatus(msg, cls) {
@@ -2614,7 +2680,10 @@ function findLiveColumns(tables) {
     // Event tables: soul changes give your souls (see startSoulsStream); purchases are detected but not needed yet.
     evPurchase: evTable(/^ItemPurchaseNotificationEvent$/, ["tick", "userid", "ability_id", "sell"]),
     evCurrency: evTable(/^CurrencyChangedEvent$/, ["tick", "userid", "currency_type", "delta", "new_value"]),
-    v: 9
+    // The game's own "game over" message (v2.8.3): the only reliable sign that a match has ended (see matchEnded).
+    evGameOver: evTable(/^GameOverEvent$/, ["tick", "winning_team"]),
+    evGameOverTest: !!evTable(/^GameOverEvent$/, ["tick", "winning_team", "just_a_test"]),
+    v: 10
   };
 }
 function schemaSummary(tables, cols) {
@@ -2738,21 +2807,29 @@ function accountFromSteam(v) {
   if (v == null || v === "") return null;
   try { const b = BigInt(String(v).trim()); if (b <= 0n) return null; return Number(b >= STEAM64_BASE ? b - STEAM64_BASE : b); } catch { return null; }
 }
-/* What the person typed: a profile link, SteamID64, [U:1:n], an account number, or a name to search. */
+/* What the person typed (v2.8.3): { accountId } for a link with the long number (steamcommunity.com/profiles/7656…), a
+   SteamID64, [U:1:n] or an account number; { vanity } for a link with a custom name (steamcommunity.com/id/name); { bad }
+   for any other link; { query } for a display name to search. Up to v2.8.2 a custom-name link was searched as if it were
+   a display name, so it found players with similar names instead of the account (a friend's link, October 13). */
 function parseSteamInput(s) {
   s = String(s || "").trim();
   let m;
   if ((m = s.match(/steamcommunity\.com\/profiles\/(\d{17})/i))) return { accountId: accountFromSteam(m[1]) };
-  if ((m = s.match(/steamcommunity\.com\/id\/([^/?#\s]+)/i))) { let q = m[1]; try { q = decodeURIComponent(q); } catch {} return { query: q }; }   // a malformed %-code is used as typed
+  if ((m = s.match(/steamcommunity\.com\/id\/([^/?#\s]+)/i))) { let v = m[1]; try { v = decodeURIComponent(v); } catch {} return { vanity: v }; }   // a malformed %-code is used as typed
+  if (/steamcommunity\.com|^https?:\/\/|^www\./i.test(s)) return { bad: true };
   if ((m = s.match(/^\[?U:1:(\d+)\]?$/i))) return { accountId: Number(m[1]) };
   if (/^\d{17}$/.test(s)) return { accountId: accountFromSteam(s) };
   if (/^\d{1,10}$/.test(s)) return { accountId: Number(s) };
   return s ? { query: s } : {};
 }
+/* The custom name in a profile link ("https://steamcommunity.com/id/name/" -> "name"), lower case; null for other links. */
+function vanityOf(url) { const m = /steamcommunity\.com\/id\/([^/?#\s]+)/i.exec(url || ""); if (!m) return null; let v = m[1]; try { v = decodeURIComponent(v); } catch {} return v.toLowerCase(); }
+/* The profile page of an account, by its number (always works, even after a custom name changes). */
+function steamProfileUrl(accountId) { return `https://steamcommunity.com/profiles/${(STEAM64_BASE + BigInt(accountId)).toString()}/`; }
 
 async function liveColumns() {
   const cached = store.get("liveCols");
-  if (cached && Date.now() - cached.at < 86400000 && cached.cols?.hero && cached.cols.v === 9) return cached.cols;
+  if (cached && Date.now() - cached.at < 86400000 && cached.cols?.hero && cached.cols.v === 10) return cached.cols;
   const sch = await getJSON("/v1/matches/demo/schema");
   const tables = sch.tables || [];
   const cols = findLiveColumns(tables);
@@ -2768,53 +2845,110 @@ async function liveColumns() {
 function renderSteam() {
   const s = S.steam;
   $("steamSaved").hidden = !s; $("steamEdit").hidden = !!s;
-  if (s) $("steamName").textContent = `${s.name || "Account " + s.accountId} (account ${s.accountId})`;
+  if (s) {
+    $("steamName").textContent = `${s.name || "Account " + s.accountId} (account ${s.accountId})`;
+    $("steamOpen").href = steamProfileUrl(s.accountId);   // so you can check it's really you
+  }
+  $("steamInput").placeholder = S.steamVanity ? "Your Steam display name (the name your friends see)" : "Steam profile link, Steam ID or display name";
   renderLive();
 }
 function saveSteam(profile) {
   S.steam = { accountId: Number(profile.account_id ?? profile.accountId), name: profile.personaname || profile.name || "" };
   store.set("steam", S.steam);
-  LIVE.steamPick = false;
+  LIVE.steamPick = false; S.steamVanity = null;
   $("steamResults").replaceChildren(); $("steamInput").value = "";
   renderSteam();
   S.myRank = null; fetchMyRank();
   if (LIVE.id) applyRoster();
 }
-/* Turn what was typed into a saved account. Returns true when an account is saved; for a name search
-   with several matches it lists them to pick from and returns false. */
+/* The data service's player search: display names only, close spellings included. "No match" is an empty list (the
+   service answers 404), not an error. */
+async function steamSearch(query, limit) {
+  const q = new URLSearchParams({ search_query: query, limit, min_matches_played_last_30d: 1 });
+  try { const rows = await getJSON(`/v1/players/steam-search?${q}`); return Array.isArray(rows) ? rows : []; }
+  catch (e) { if (e.status === 404) return []; throw e; }
+}
+/* One search result: picture, name, the profile link it belongs to (its custom name, or the long number), recent matches,
+   a link to open the profile and check, and "This is me". */
+function steamRow(r, note) {
+  const row = document.createElement("div"); row.className = "acct";
+  const src = r.avatarmedium || r.avatar || "";
+  const pic = src ? img(src) : document.createElement("span"); pic.className = "acct-pic";
+  const who = document.createElement("div");
+  const nm = document.createElement("b"); nm.textContent = r.personaname || "Account " + r.account_id;
+  const link = document.createElement("span"); link.className = "small muted acct-link";
+  const v = vanityOf(r.profileurl);
+  link.textContent = (v ? "steamcommunity.com/id/" + v : "steamcommunity.com/profiles/" + (STEAM64_BASE + BigInt(r.account_id)).toString()) + ` · ${r.matches_played_last_30d ?? 0} matches in 30 days`;
+  who.append(nm, link);
+  if (note) { const n = document.createElement("span"); n.className = "small ok-text acct-link"; n.textContent = note; who.append(n); }
+  const open = document.createElement("a"); open.className = "btn tiny"; open.textContent = "Open profile"; open.target = "_blank"; open.rel = "noopener";
+  open.href = r.profileurl || steamProfileUrl(r.account_id);
+  const pick = document.createElement("button"); pick.type = "button"; pick.className = "btn tiny main"; pick.textContent = "This is me";
+  pick.onclick = () => { saveSteam(r); liveStatus(`Saved: ${r.personaname || "your account"}.`, "ok"); if (S.pendingFind) { S.pendingFind = false; findMyMatch(); } };
+  const act = document.createElement("div"); act.className = "acct-act"; act.append(open, pick);
+  row.append(pic, who, act);
+  return row;
+}
+/* Turn what was typed into a saved account. Returns true when an account is saved; otherwise it explains what to do next
+   or lists accounts to pick from (each with its profile link, to check) and returns false.
+   - A link with the long number or a Steam ID: that exact account.
+   - A link with a custom name (steamcommunity.com/id/name): the data service can't look those up directly (Steam's own
+     lookup needs a private key, which a public page can't hold). The tool searches for players whose display name is
+     like the custom name and keeps only one whose saved profile link has exactly that custom name. If none does, it asks
+     for the display name and then picks the player whose profile link matches. It never offers look-alike names as if
+     they were the account.
+   - A display name: players with that name or a close spelling, each with its profile link. */
 async function resolveSteam() {
   if (S.steam) return true;
   const p = parseSteamInput($("steamInput").value);
   const box = $("steamResults"); box.replaceChildren();
-  const msg = (t, cls) => { const e = document.createElement("p"); e.className = "small " + (cls || "muted"); e.textContent = t; box.append(e); };
-  if (!p.accountId && !p.query) { liveStatus("First type your Steam name, profile link or Steam ID in the box below, then press Find my match again.", "warn"); $("steamInput").focus(); return false; }
+  const msg = (t, cls) => { const e = document.createElement("p"); e.className = "small " + (cls || "muted"); e.textContent = t; box.append(e); return e; };
+  if (!p.accountId && !p.query && !p.vanity && !p.bad) { liveStatus("First type your Steam profile link, Steam ID or display name in the box below, then press Find my match again.", "warn"); $("steamInput").focus(); return false; }
+  if (p.bad) { liveStatus("That link isn't a Steam profile. Open your profile on Steam, copy its address (it starts with steamcommunity.com/id/ or steamcommunity.com/profiles/) and paste it here. Your Steam ID or display name works too.", "error"); return false; }
   LIVE.steamBusy = true; renderLive();
   try {
     if (p.accountId) {
       const rows = await getJSON(`/v1/players/steam?account_ids=${p.accountId}`).catch(() => []);
-      saveSteam(rows[0] || { account_id: p.accountId });
+      const row = Array.isArray(rows) ? rows[0] : null;
+      saveSteam(row || { account_id: p.accountId });
+      liveStatus(row ? `Saved: ${row.personaname || "your account"}. Use "Open profile" next to it if you want to check it's you.`
+        : "Saved that Steam ID. The data service doesn't know its name yet (it learns names from recent matches), but finding your match works the same.", "ok");
       return true;
     }
-    const q = new URLSearchParams({ search_query: p.query, limit: 6, min_matches_played_last_30d: 1 });
-    const rows = await getJSON(`/v1/players/steam-search?${q}`);
-    if (!rows.length) { liveStatus("No Deadlock player found with that Steam name. Try your profile link or Steam ID instead.", "error"); return false; }
-    const exact = rows.filter(r => (r.personaname || "").toLowerCase() === p.query.toLowerCase());
-    if (rows.length === 1) { saveSteam(rows[0]); return true; }
-    LIVE.steamPick = true;
-    msg(exact.length === 1 ? "Is this you? Several players have similar names, so check the picture and match count." : "Which one is you? Check the picture and match count.");
-    for (const r of rows) {
-      const b = document.createElement("button"); b.type = "button"; b.className = "srow";
-      b.style.gridTemplateColumns = "28px minmax(0,1fr) auto";
-      const pic = img(r.avatar || ""); pic.style.width = pic.style.height = "28px"; pic.style.borderRadius = "4px";
-      const nm = document.createElement("span"); nm.className = "name"; nm.textContent = r.personaname;
-      const n = document.createElement("span"); n.className = "small muted"; n.textContent = `${r.matches_played_last_30d} matches in 30 days`;
-      b.append(pic, nm, n); b.onclick = () => { saveSteam(r); if (S.pendingFind) { S.pendingFind = false; findMyMatch(); } };
-      box.append(b);
+    if (p.vanity) {
+      S.steamVanity = p.vanity.toLowerCase();
+      const hits = await steamSearch(p.vanity, 50);
+      const exact = hits.filter(r => vanityOf(r.profileurl) === S.steamVanity);
+      if (exact.length === 1) { saveSteam(exact[0]); liveStatus(`Found your account from your profile link: ${exact[0].personaname}.`, "ok"); return true; }
+      $("steamInput").value = ""; renderSteam(); $("steamInput").focus();
+      msg(`Your profile link uses a custom name ("${p.vanity}"), which can't be looked up directly. Type your Steam display name (the name your friends see) in the box above and press Save: the tool then picks the account whose profile link is yours.`);
+      msg("Or use your Steam ID instead: in Steam, click your name at the top right, then Account details. The long number under your name is your Steam ID.");
+      liveStatus("One more step: type your Steam display name.", "warn");
+      return false;
     }
+    // A display name, possibly after a custom-name link (S.steamVanity): search wide, then use the link to pick exactly.
+    const hits = await steamSearch(p.query, S.steamVanity ? 100 : 25);
+    if (S.steamVanity) {
+      const exact = hits.filter(r => vanityOf(r.profileurl) === S.steamVanity);
+      if (exact.length === 1) { saveSteam(exact[0]); liveStatus(`Found your account: ${exact[0].personaname}, with your profile link.`, "ok"); return true; }
+    }
+    if (!hits.length) {
+      liveStatus(`No Deadlock player called "${p.query}" (or a close spelling) played a match in the last 30 days, as far as the data service knows. Check the spelling, or paste your profile link or Steam ID instead.`, "error");
+      return false;
+    }
+    const lower = p.query.toLowerCase();
+    const sorted = hits.slice().sort((a, b) => ((b.personaname || "").toLowerCase() === lower) - ((a.personaname || "").toLowerCase() === lower));
+    const exactName = sorted.filter(r => (r.personaname || "").toLowerCase() === lower);
+    if (!S.steamVanity && sorted.length === 1 && exactName.length === 1) { saveSteam(sorted[0]); liveStatus(`Saved: ${sorted[0].personaname}. Use "Open profile" next to it if you want to check it's you.`, "ok"); return true; }
+    LIVE.steamPick = true;
+    msg(S.steamVanity
+      ? `None of these has your profile link (steamcommunity.com/id/${S.steamVanity}); the data service may have an older copy of your profile. If yours is here, check it with "Open profile", then press "This is me".`
+      : exactName.length ? "Which one is you? Players with this name or a close spelling are listed. Check the picture, or open the profile to be sure." : `Nobody is called exactly "${p.query}". These are close spellings: check the picture, or open the profile to be sure. Your profile link or Steam ID always finds the right account.`);
+    for (const r of sorted.slice(0, 8)) box.append(steamRow(r, (r.personaname || "").toLowerCase() === lower ? "Same name as you typed" : ""));
     liveStatus("Pick your Steam account from the list.", "warn");
     return false;
   } catch {
-    liveStatus("Couldn't look up Steam accounts right now. Check your internet connection, or type your Steam ID instead of your name.", "error");
+    liveStatus("Couldn't look up Steam accounts right now. Check your internet connection, or paste your Steam ID instead.", "error");
     return false;
   } finally { LIVE.steamBusy = false; renderLive(); }
 }
@@ -3005,7 +3139,7 @@ function unlinkMatch(quiet) {
   Object.assign(LIVE, { streams: {}, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
     itemsOk: false, itemsChecked: false, idSeen: 0, idKnown: 0, idSamples: [], knownSet: null, rawItemSample: "", rawSoulsSample: "", soulsRows: 0, invSig: "", souls: null, nw: null, meHow: null,
     laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
-    connecting: false, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null });
+    connecting: false, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
   clearTimeout(LIVE.soulsCheck);
   S.matchId = null;
   renderSources();
@@ -3014,6 +3148,29 @@ function unlinkMatch(quiet) {
   renderLive();
 }
 
+/* The match is over (v2.8.3). confirmed: the game's game-over message arrived. probable: the broadcast stopped twice with
+   nothing newer in between, and no game-over message (the tool can't be sure, so it says so and Connect resumes). */
+function matchEnded(how) {
+  if (!LIVE.id || LIVE.rosterState?.state === "ended") return;
+  for (const k in LIVE.streams) LIVE.streams[k].stop();
+  S.endedMatchId = LIVE.id; LIVE.endHow = how;
+  logEvent("end", { how }); logClose(how === "confirmed" ? "match ended" : "broadcast stopped");
+  LIVE.rosterState = { state: "ended", text: how };
+  const rec = LOG.on ? " Its record is kept under Setup → Match records." : "", watch = S.watch ? " Watching for your next match." : "";
+  liveStatus(how === "confirmed" ? "The match has ended. Live link finished." + rec + watch
+    : "The live broadcast stopped and didn't come back, so the match has probably ended. Still playing? Press Connect to reconnect (free for the same match); anything you mark by hand is kept." + rec + watch, "muted");
+  renderLive(); renderSources();
+}
+function startGameOverStream() {
+  const c = LIVE.cols;
+  if (LIVE.streams.gameover || !LIVE.url || !c?.evGameOver || !LIVE.applied) return;
+  const sql = `SELECT ${qcol("tick")} AS tick, ${qcol("winning_team")} AS winner${c.evGameOverTest ? `, ${qcol("just_a_test")} AS test` : ""} FROM ${qtable(c.evGameOver)}`;
+  LIVE.streams.gameover = liveStream("gameover", sql, r => {
+    if (r.test === true || r.test === 1 || r.test === "true") return;   // the game's own test message, not a real end
+    LIVE.gameOver = { tick: r.tick != null ? Number(r.tick) : null, winner: r.winner ?? null };
+    matchEnded("confirmed");
+  });
+}
 function startRulesStream() {
   const c = LIVE.cols;
   if (LIVE.streams.rules || !LIVE.url || !c?.rulesTable || !c.rulesStart || !LIVE.applied) return;
@@ -3146,7 +3303,7 @@ function liveBudgetWait() {
    control. Permanent problems (an invalid query) stop at once with a report; temporary ones
    (relay not ready, network, rate limit) retry with growing waits, then give up. */
 function liveStream(name, sql, onRow, onReject) {
-  let ctrl = null, stopped = false, tries = 0, timer = null, gotRows = false;
+  let ctrl = null, stopped = false, tries = 0, timer = null, gotRows = false, endCheck = null, dog = null, lastByteAt = 0;
   const roster = name === "roster";
   // What happened to each stream, for match records (no personal data): rows received, last status, last problem.
   const info = (LIVE.streamInfo ||= {})[name] = { rows: 0, started: Date.now(), status: null, problem: null, retries: 0 };
@@ -3157,6 +3314,7 @@ function liveStream(name, sql, onRow, onReject) {
     store.set("liveCols", null); say(m, "error", "error"); };
   const retry = (m, waitS) => {
     if (stopped) return;
+    clearTimeout(timer); clearInterval(dog);
     if (tries >= RETRY_DELAYS.length) { say("Lost the live connection after several tries. Press Connect to try again (reconnecting to the same match is free).", "error", "error"); stopped = true; return; }
     const s = waitS ?? RETRY_DELAYS[tries]; tries++; info.retries++; info.problem = m;
     say(`${m} Trying again in ${s} s (${tries} of ${RETRY_DELAYS.length}).`, "warn", "warn");
@@ -3168,6 +3326,10 @@ function liveStream(name, sql, onRow, onReject) {
     if (w > 0) { timer = setTimeout(run, w); return; }
     LIVE.reqTimes.push(Date.now());
     ctrl = new AbortController();
+    /* A connection that silently stops (no rows, no messages, not even the service's keep-alive every 15 s) would never
+       end by itself: after LIVE_QUIET.ms of nothing at all, it's dropped and reconnected (v2.8.3). */
+    clearInterval(dog); lastByteAt = Date.now();
+    dog = setInterval(() => { if (stopped) { clearInterval(dog); return; } if (Date.now() - lastByteAt > LIVE_QUIET.ms) { clearInterval(dog); const c = ctrl; ctrl = null; c?.abort(); info.quietDrops = (info.quietDrops || 0) + 1; retry("The live stream went silent."); } }, 5000);
     const q = new URLSearchParams({ broadcast_url: LIVE.url, query: sql });
     let res;
     try { res = await fetch(`${API}/v1/matches/demo/live/query?${q}`, { signal: ctrl.signal, headers: { Accept: "text/event-stream" } }); }
@@ -3184,6 +3346,7 @@ function liveStream(name, sql, onRow, onReject) {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        lastByteAt = Date.now();
         info.bytes = (info.bytes || 0) + value.length;   // how much data each stream uses (match records)
         buf += dec.decode(value, { stream: true }).replace(/\r/g, "");
         let i;
@@ -3215,18 +3378,31 @@ function liveStream(name, sql, onRow, onReject) {
               return fatal("The live data service didn't accept the tool's request. Open \"Technical details\" below if you want to report it.", msg.slice(0, 400));
             return retry(st === 502 ? "The match broadcast isn't available yet." : "The live stream reported a problem.");
           } else if (ev === "end") {
+            /* "end" means the data service's stream finished, not that the match did: its code ends the stream when the
+               broadcast stops, which also happens when fetching the next piece of the broadcast fails or a piece can't be
+               read (Venator, October 13: "match ended" at 30:18 while the match went on). So (v2.8.3):
+               - the game's own game-over message (GameOverEvent, its own small stream) confirms the end;
+               - otherwise the tool reconnects (same match, no connection used up), and only if the broadcast again
+                 stops without any newer data does it conclude the match has probably ended, and says so;
+               - the other streams reconnect too instead of stopping for good (souls stopped updating before). */
             ctrl.abort();
-            if (gotRows) { stopped = true; if (roster) { S.endedMatchId = LIVE.id; logEvent("end"); logClose("match ended"); }
-              say("The match has ended. Live link finished." + (LOG.on && roster ? " Its record is kept under Setup → Match records." : "") + (S.watch ? " Watching for your next match." : ""), "muted", "ended"); return; }
-            return retry("The broadcast stopped before sending any data.");
+            if (!gotRows) return retry("The broadcast stopped before sending any data.");
+            if (LIVE.rosterState?.state === "ended" || (LIVE.gameOver && roster)) { stopped = true; if (roster) matchEnded("confirmed"); return; }
+            if (!roster) return retry("The live stream stopped.", 10);
+            const t = LIVE.lastTick || 0;
+            endCheck = endCheck && t <= endCheck.tick + TICK_RATE * 5 ? { ...endCheck, n: endCheck.n + 1 } : { tick: t, n: 1 };
+            LIVE.endChecks = (LIVE.endChecks || 0) + 1;
+            if (endCheck.n >= 2) { stopped = true; matchEnded("probable"); return; }
+            return retry("The live broadcast stopped sending data. That's usually a short hiccup on the broadcast's side, so the tool is reconnecting (no connection used up).", 10);
           }
         }
       }
+      clearInterval(dog);
       retry("The live stream closed.");
-    } catch (e) { if (!stopped && e.name !== "AbortError") retry("The live stream was interrupted."); }
+    } catch (e) { clearInterval(dog); if (!stopped && e.name !== "AbortError") retry("The live stream was interrupted."); }
   };
   run();
-  return { stop() { stopped = true; clearTimeout(timer); ctrl?.abort(); } };
+  return { stop() { stopped = true; clearTimeout(timer); clearInterval(dog); ctrl?.abort(); } };
 }
 
 /* Item IDs arrive as a list of hex byte strings (see liveItemId). Only shop items are kept; other
@@ -3381,7 +3557,7 @@ function applyRoster() {
     LIVE.applied = true; S.lastMatchId = LIVE.id; saveMatch(); tlMark("teams set up");
     if (!S.active && S.enemies.length) recommend();
   }
-  startSoulsStream(); startRulesStream(); startTeamStream();
+  startSoulsStream(); startRulesStream(); startTeamStream(); startGameOverStream();
   if (!LIVE.lobby || LIVE.lobby.matchId !== LIVE.id) { if (!LIVE.lobbyRetryAt || Date.now() > LIVE.lobbyRetryAt) fetchLobbyRank(); }
   if (S.active && (invChanged || teamChanged || laneChanged)) renderResults();
   // One message per stage (teams from the Watch list, then fully live), never repeated or written over
@@ -3493,6 +3669,7 @@ function logDiag() {
     d.timeline = LIVE.timeline?.length ? LIVE.timeline.map(([k, at]) => [k, Math.round((at - LIVE.timeline[0][1]) / 1000)]) : null;
     d.thin = LIVE.thin ?? null; d.thinRejected = LIVE.thinRejected || null; d.deathSamples = LIVE.deathSamples || null; d.deaths = (S.deaths || []).slice(0, 40);
     d.replayedRowsIgnored = LIVE.replayedRows || 0;
+    d.matchEnd = { how: LIVE.endHow || null, endsWithoutGameOver: LIVE.endChecks || 0, gameOver: LIVE.gameOver || null, gameOverStream: !!LIVE.cols?.evGameOver };   // v2.8.3
     d.spectateFails = LIVE.spectateFails?.length ? LIVE.spectateFails.map(f => ({ status: f.status, reason: f.reason, auto: f.auto })) : null;
     d.heroesFromMatch = S.heroesAdded?.length ? S.heroesAdded : null;   // heroes the game data didn't list yet (v2.8.1)
     d.schemaSummary = String(store.get("liveCols")?.summary || "").split("\n").filter(l => /^(Controller|Pawn) columns/.test(l)).join("\n").slice(0, 3000);   // column names only
@@ -3921,11 +4098,13 @@ function renderDetail(entry, souls, labelText) {
   const fits = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 3)
     .map(f => [`with ${itemName(f.anchorId)}`, `${pts(f.lift)} pts`, "up"]);
   const live = (s.mechWhy || []).map(x => [x, null]);
+  if (s.amp && !s.amp.none) fits.push([`Amplifies your healing from ${s.amp.sources.slice(0, 3).join(", ")}${s.amp.sources.length > 3 ? " and more" : ""}`, null]);
   const warns = [...(s.vs || []).filter(x => x.z <= -WEAK_Z).map(x => [`vs ${heroName(x.enemyId)}`, `${pts(x.lift)} pts`, "down"]),
     ...(s.fits || []).filter(f => f.z <= -WEAK_Z).map(f => [`with ${itemName(f.anchorId)} (may overlap)`, `${pts(f.lift)} pts`, "down"]),
     ...(s.mechWarn || []).map(x => [x, null])];
   if ((s.rarePenalty || 0) >= 0.003) warns.push([`Few ${heroName(S.me)} players buy it at this stage (${Math.max(0.1, Math.round((s.popShare || 0) * 1000) / 10)}% as many as the most popular item), so it needs a strong reason`, null]);
-  if (lacksReason(s)) warns.push(["Out of its stage, and nothing in this match calls for it, so it isn't planned", null]);
+  if (s.amp?.none) warns.push([`Nothing to amplify: ${it.name} works with healing you apply${s.amp.noLifesteal ? " (abilities or items that heal, not lifesteal or regen)" : " (lifesteal, or abilities and items that heal)"}. Your hero's abilities don't heal and you own nothing that does, so only its basic stats count and it isn't planned.`, null]);
+  else if (lacksReason(s)) warns.push(["Out of its stage, and nothing in this match calls for it, so it isn't planned", null]);
   if (s.mismatch > 0 && S.view?.lean) warns.push([`Goes against your build: you're building ${S.view.lean.lean > 0 ? "spirit" : "gun"} damage and this is a ${itemOrientation(it) > 0 ? "spirit" : "gun"} item`, null]);
   if (entry.sell) warns.push([`Needs a free slot: sell ${entry.sell.item?.name || "an item"} first (you get back ${entry.sell.refund.toLocaleString()} souls)`, null]);
   const std = (kind === "core" || kind === "part") && s.base ? [[`Win rate when bought now (${s.base.players.toLocaleString()} players)`, pct(s.pb)]] : [];
@@ -4063,7 +4242,7 @@ function renderResultsInner() {
   const skipped = skippedNow();
   const { order, groups, scoredById, match, lean, ownedRates } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
     prog: S.prog, owned: S.owned, souls, lane: S.lane, threatW, fed, fl, sec, curve: S.curve, slotCap: slotsNow.cap, skipped, prevOrder: S.prevOrder,
-    roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName });
+    roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me) });
 
   // Possible unmarked purchases (see checkSoulsDrop); drop the ones that are owned or were just sold.
   const now = Date.now();
@@ -4488,6 +4667,7 @@ async function init() {
     const hn = heroNews(S.heroes.filter(h => !h.added).map(h => h.id), store.get("heroIds"), store.get("heroNews"));
     S.heroNews = hn.news; store.set("heroIds", hn.ids); store.set("heroNews", hn.news);
     const all = items.filter(i => i.type === "upgrade");
+    S.abilityByClass = Object.fromEntries(items.filter(i => i && i.type === "ability" && i.class_name).map(i => [i.class_name, i]));   // hero abilities (v2.8.3)
     all.forEach(i => S.itemByClass[i.class_name] = i);
     S.items = all.filter(i => i.shopable && !i.disabled && i.cost > 0 && i.name && ["weapon", "spirit", "vitality"].includes(i.item_slot_type))
       .sort((a, b) => (a.cost - b.cost) || a.name.localeCompare(b.name));
@@ -4622,7 +4802,7 @@ ${rows.join("\n")}`);
   $("liveDiag").open = true;
 };
 $("steamInput").onkeydown = e => { if (e.key === "Enter") findSteam(); };
-$("steamChange").onclick = () => { S.steam = null; store.set("steam", null); S.myRank = null; store.set("myRank", null); renderRankNote(); renderSteam(); $("steamInput").focus(); if (LIVE.id) applyRoster(); };
+$("steamChange").onclick = () => { S.steam = null; S.steamVanity = null; store.set("steam", null); S.myRank = null; store.set("myRank", null); renderRankNote(); renderSteam(); $("steamInput").focus(); if (LIVE.id) applyRoster(); };
 $("unlinkMatch").onclick = () => unlinkMatch(false);
 $("matchId").onkeydown = e => { if (e.key === "Enter") linkMatch(); };
 function openSetup(show) {
