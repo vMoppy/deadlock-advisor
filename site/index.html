@@ -294,7 +294,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.8.3</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.8.4</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
@@ -508,10 +508,14 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.8.3";   // shown in the top bar and written into match records
+const VERSION = "v2.8.4";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.8.4", date: "October 13, 2026", items: [
+    "If the live data stops (the broadcast ends or pauses), your souls now carry on from your last live number and keep growing with the match clock. Before, they froze or jumped to the average player's number, so the buy order stopped changing late in the match.",
+    "Item effects are now read from the game's own stat names. Healbane and other healing reduction items are only tied to enemy items that really heal (not small regen like Monster Rounds or Sprint Boots), weighted by how much the enemies spent on healing.",
+    "Fixed wrong reasons: Spirit Shredder Bullets reduces spirit resist (not bullet resist), Superior Cooldown and Leech aren't healing reduction, and slow resistance (Enduring Speed, Fleetfoot) isn't crowd control. Mystic Slow now counts as crowd control, and items that ignore resist (Armor Piercer, Tankbuster) count as answers to it."] },
   { v: "v2.8.3", date: "October 13, 2026", items: [
     "Steam profile links with a custom name (steamcommunity.com/id/…) no longer list players with look-alike names. If the tool can't match the link directly, it asks for your display name and then picks the account with your link. Each result shows its profile link, with an Open profile button to check.",
     "A short break in Valve's broadcast no longer ends the match in the tool. It reconnects by itself, and only the game's own game-over message (or a broadcast that stops for good) ends the live link.",
@@ -1562,21 +1566,53 @@ function spentOn(owned, itemById) { let s = 0; for (const id of owned) s += item
 const TAG_NAMES = { sustain: "healing", antiheal: "healing reduction", cc: "crowd control", cleanse: "debuff protection",
   bulletRes: "bullet resist", spiritRes: "spirit resist", bulletShred: "bullet resist reduction", spiritShred: "spirit resist reduction", aura: "aura", invest: "builds value over time" };
 
+/* What an item does, for the match-aware layer. From v2.8.4 the game's own stat names decide where they exist (Deadlock
+   calls spirit "Tech" and bullet resist "Armor"), and the description only adds what it says plainly. Up to v2.8.3 broad
+   word matching over names and texts mislabelled many items: "Spirit Shredder" counted as reducing BULLET resist (its
+   name contains "shred"), 55 items counted as enemy "healing" because they have a little regen (Monster Rounds, Sprint
+   Boots, Grit...), and Superior Cooldown and Leech counted as healing reduction. That inflated Healbane everywhere and
+   gave Spirit Shredder a false reason on Solomon (October 13). Items with no stats at all (made-up test items) still
+   use the old word rules. */
 function itemTags(it) {
-  const props = Object.entries(it.properties || {})
-    .filter(([, v]) => v && v.value != null && parseFloat(v.value) !== 0)
-    .map(([k, v]) => `${k} ${v.label || ""} ${v.postfix || ""}`);
-  const t = [it.class_name || "", it.name || "", itemText(it), ...props].join(" ").toLowerCase();
+  const P = Object.entries(it.properties || {}).filter(([, v]) => v && v.value != null && parseFloat(v.value) !== 0);
+  const keyed = P.length > 0;
+  const num = k => { const e = P.find(([key]) => key === k); return e ? parseFloat(e[1].value) : 0; };
+  const has = re => P.some(([k]) => re.test(k));
+  const props = P.map(([k, v]) => `${k} ${v.label || ""} ${v.postfix || ""}`);
+  const t = [it.class_name || "", it.name || "", itemText(it), ...props].join(" ").toLowerCase();   // the old word rules
+  const d = fullText(it);   // the description alone
   const tags = new Set();
-  // Resist reduction ("shred"). Untyped armour reduction counts as bullet, as armour means bullet resist in Deadlock's item names.
-  if (/bullet\s*(resist|armou?r)\w*\s*(reduction|reduce|shred)|reduc\w*[^.]{0,25}bullet\s*(resist|armou?r)|bullet(armou?r|resist)reduction|(^|[^a-z])armou?r\s*reduction|\bshred/.test(t)) tags.add("bulletShred");
-  if (/(spirit|tech)\s*(resist|armou?r)\w*\s*(reduction|reduce|shred)|reduc\w*[^.]{0,25}(spirit|tech)\s*(resist|armou?r)|(tech|spirit)(armou?r|resist)reduction/.test(t)) tags.add("spiritShred");
-  if (/heal\w*\s*(reduction|reduce|penalty)|healamp\w*penalty|reduc\w*[^.]{0,30}heal|anti-?heal|healbane/.test(t)) tags.add("antiheal");
-  else if (/life\s*steal|spirit\s*vamp|\bregen|healing|heals?\b|heal(th)?regen/.test(t)) tags.add("sustain");
-  if (/debuff\s*(remov|immun|cleans)|cleanse|purge|unstoppable|slowimmunity|debuffimmunity|immun\w*\s+to\s+(slow|debuff|stun|cc)/.test(t)) tags.add("cleanse");
-  else if (/\bstun|\broot|silence|disarm|\bsleep|\bslow(s|ed|ing)?\b|knock\s*(up|down|back)|immobili|containment|suppress|\bhex|\bcurse/.test(t)) tags.add("cc");
-  if (!tags.has("bulletShred") && /bullet\s*(resist|armou?r|shield)/.test(t)) tags.add("bulletRes");
-  if (!tags.has("spiritShred") && /(spirit|tech)\s*(resist|armou?r|shield)/.test(t)) tags.add("spiritRes");
+  if (keyed) {
+    // Reducing, stealing or ignoring the enemy's resist all answer it (Armor Piercer "ignoring their Bullet Resistance",
+    // Tankbuster "Ignores Spirit Resistance", Shadow Strike "steal bullet and spirit resistance").
+    const bRed = num("BulletArmorReduction") || num("BulletResistReduction"), sRed = num("MagicResistReduction") || num("TechArmorDamageReduction") || num("TechResistReduction");
+    if (bRed || /reduc\w*\s+(\w+\s+){0,3}bullet\s*resist|(steal|ignor)\w*[^.]{0,30}\bbullet\b[^.]{0,20}resist/.test(d)) tags.add("bulletShred");
+    if (sRed || /reduc\w*\s+(\w+\s+){0,3}spirit\s*resist|(steal|ignor)\w*[^.]{0,30}\bspirit\b[^.]{0,20}resist/.test(d)) tags.add("spiritShred");
+    if (has(/^HealAmp(Receive|Regen)PenaltyPercent$/)) tags.add("antiheal");
+    else { const h = healTraits(it); if (h.heals || h.lifesteal) tags.add("sustain"); }
+    // A resist number equal to the item's own reduction is the same debuff shown twice (Mystic Vulnerability lists
+    // "Spirit Resist -8" and "Spirit Resist 8"), not resist for you.
+    const gain = (k, red) => num(k) > 0 && !(red && Math.abs(num(k) - Math.abs(red)) < 1e-6);
+    if (gain("BulletResist", bRed) || num("BuffBulletResist") > 0 || has(/^BulletResist(BelowThreshold|PerStack)$/) || /(gain|grants?|increases?)\s+(\w+\s+){0,2}bullet\s*resist/.test(d)) tags.add("bulletRes");
+    if (gain("TechResist", sRed) || num("BuffTechResist") > 0 || has(/^(TechResistBelowThreshold|TechArmorGain)$/) || /(gain|grants?|increases?|apply)\s+(\w+\s+){0,2}spirit\s*resist/.test(d)) tags.add("spiritRes");
+  } else {
+    if (/bullet\s*(resist|armou?r)\w*\s*(reduction|reduce|shred)|reduc\w*[^.]{0,25}bullet\s*(resist|armou?r)|bullet(armou?r|resist)reduction|(^|[^a-z])armou?r\s*reduction|\bshred/.test(t)) tags.add("bulletShred");
+    if (/(spirit|tech)\s*(resist|armou?r)\w*\s*(reduction|reduce|shred)|reduc\w*[^.]{0,25}(spirit|tech)\s*(resist|armou?r)|(tech|spirit)(armou?r|resist)reduction/.test(t)) tags.add("spiritShred");
+    if (/heal\w*\s*(reduction|reduce|penalty)|healamp\w*penalty|reduc\w*[^.]{0,30}heal|anti-?heal|healbane/.test(t)) tags.add("antiheal");
+    else if (/life\s*steal|spirit\s*vamp|\bregen|healing|heals?\b|heal(th)?regen/.test(t)) tags.add("sustain");
+    if (!tags.has("bulletShred") && /bullet\s*(resist|armou?r|shield)/.test(t)) tags.add("bulletRes");
+    if (!tags.has("spiritShred") && /(spirit|tech)\s*(resist|armou?r|shield)/.test(t)) tags.add("spiritRes");
+  }
+  if (/debuff\s*(remov|immun|cleans)|remov\w*\s+(\w+[\s-]+){0,3}debuffs?|cleanse|purge|unstoppable|slowimmunity|debuffimmunity|immun\w*\s+to\s+(slow|debuff|stun|cc)/.test(t)) tags.add("cleanse");
+  // Crowd control: what the description says the item does to enemies (stat names like "slow resistance" and item names
+  // are left out from v2.8.4: Enduring Speed and Fleetfoot counted as crowd control for their slow resistance).
+  // The stat names count too when they are plainly done to enemies (Mystic Slow: "Move Speed reduced", stat MovementSpeedSlow);
+  // a "SlowPercent" counts only when labelled as Move Speed (Glass Cannon's is a leftover with nothing in its description).
+  // Effects on yourself don't count (Fury Trance "silences you", Reactive Barrier "when you are stunned").
+  else if (keyed ? (/\bstun|\broot|silence|disarm|\bsleep|\bslow(s|ed|ing)?\b|knock\s*(up|down|back)|immobili|containment|suppress|\bhex|\bcurse|move\s*speed\s*(is\s*)?reduc|reduc\w*\s+(\w+\s+){0,3}move\s*speed/.test(d.replace(/slow\s*resist\w*|(silences?|stuns?|slows?|roots?|disarms?)\s+you\b[^.]*|when you are [^.]*/g, ""))
+      || has(/^(MovementSpeedSlow|StunDuration|SilenceDuration|FreezeDuration|TetherDuration|DisarmDuration|ImmobilizeDuration|SleepDuration)$/)
+      || P.some(([k, v]) => k === "SlowPercent" && /move\s*speed/i.test(v.label || "")))
+    : /\bstun|\broot|silence|disarm|\bsleep|\bslow(s|ed|ing)?\b(?!\s*resist)|knock\s*(up|down|back)|immobili|containment|suppress|\bhex|\bcurse/.test(t)) tags.add("cc");
   if (/aura/.test(t)) tags.add("aura");
   // Value that builds up the longer you own it: souls per minute, growing or permanent stacks. Bought late,
   // there's little match left to collect it (e.g. Golden Goose Egg: "grows the longer you hold onto it").
@@ -1604,7 +1640,7 @@ function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyW
     for (const id of ids) {
       const it = itemById[id]; if (!it) continue;
       const tags = tagsOf(it);
-      for (const k of ["sustain", "cc", "bulletRes", "spiritRes"]) if (tags.has(k)) P[k].push({ enemy, id, w });
+      for (const k of ["sustain", "cc", "bulletRes", "spiritRes"]) if (tags.has(k)) P[k].push({ enemy, id, w, cost: it.cost || 0 });
       if (it.item_slot_type === "weapon") P.weaponCost += w * (it.cost || 0);
       if (it.item_slot_type === "spirit") P.spiritCost += w * (it.cost || 0);
     }
@@ -1644,7 +1680,9 @@ function mechNeeds(P, heroName) {
   const mates = tag => P.teamBy?.get(tag)?.size || 0;
   const teamF = tag => 1 / (1 + TEAM_STACK * mates(tag));
   const teamTxt = (tag, what) => mates(tag) ? `; ${mates(tag) === 1 ? "a teammate already applies" : mates(tag) + " teammates already apply"} ${what} (${[...P.teamBy.get(tag)].map(heroName).join(", ")})` : "";
-  add("antiheal", sat(sum(P.sustain) / 2) * teamF("antiheal"),
+  // Weighted by what the enemies spent on healing (v2.8.4): an 800-soul Melee Lifesteal is a small threat, a 6,400-soul Leech
+  // a large one. 3,200 souls of healing items is about what two healing items counted as before.
+  add("antiheal", sat(P.sustain.reduce((a, x) => a + x.w * (x.cost || 1600), 0) / 3200) * teamF("antiheal"),
     `${P.sustain.length} enemy healing item${P.sustain.length > 1 ? "s" : ""} (${names(P.sustain)})` + teamTxt("antiheal", "healing reduction"));
   add("cleanse", sat(sum(P.cc) / 2), `${P.cc.length} enemy crowd-control item${P.cc.length > 1 ? "s" : ""} (${names(P.cc)})`);
   const dmg = P.weaponCost + P.spiritCost;
@@ -2500,7 +2538,15 @@ function updateSouls(force) {
     tagEl.title = { live: "Your souls, read from the live match (1 to 2 minutes behind).", livenw: "Worked out from your live net worth minus your items.", clock: "Estimated from the match clock. Type your in-game number to correct it." }[b.src];
   }
   if (!b) { hint.textContent = S.clockStart == null ? "Start the match clock or link the match, and souls fill in by themselves." : S.me ? "Loading soul estimates…" : "Pick your hero to estimate souls."; S.soulSrc = null; return; }
-  if (b.src !== S.soulSrc) { if (S.soulSrc) S.soulOffset = 0; S.soulSrc = b.src; b = soulBase(); }
+  if (b.src !== S.soulSrc) {
+    const was = S.soulSrc, last = S.lastSouls;
+    if (S.soulSrc) S.soulOffset = 0;
+    S.soulSrc = b.src; b = soulBase();
+    /* Live souls stopped (the broadcast ended or paused): carry on from your last live number, growing at your hero's usual
+       income, instead of jumping to the average player's (v2.8.4). Before, the number either froze at the last live value
+       or reset to the average, so the buy order stopped changing (Venator and Solomon, about 30 minutes in). */
+    if ((was === "live" || was === "livenw") && b.src !== "live" && last != null) { S.soulOffset = last - (b.value - S.soulOffset); b = soulBase(); }
+  }
   const v = autoSouls();
   if (document.activeElement !== $("souls")) $("souls").value = v;
   const off = Math.round(S.soulOffset / 100) * 100;
