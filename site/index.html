@@ -294,7 +294,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.8.6</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.8.7</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
@@ -508,10 +508,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.8.6";   // shown in the top bar and written into match records
+const VERSION = "v2.8.7";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.8.7", date: "October 14, 2026", items: [
+    "The buy order shows four steps even when your slots are full. Steps after the first two say \"if your slots are still full\" when they need a sale.",
+    "Marking a step bought when it sells something first now marks the sale too (half its price back), and Undo reverses both. Before, the sold item stayed in your list until the live match caught up."] },
   { v: "v2.8.6", date: "October 14, 2026", items: [
     "Fixed: the tool could suggest selling an item seconds after suggesting you buy it. An item you just bought now keeps the value it had when you bought it for a few minutes, and selling it that soon needs a clearly better item (twice the value), with the reason shown.",
     "No more sudden change at 30:00: the tool now blends gradually there, as it already did at 9:00 and 20:00.",
@@ -1379,7 +1382,15 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
      an upgrade takes its part's slot; a new item needs a free slot (and an active item one of the 4 active
      slots). When none is free, the least valuable item you'd hold is sold for half its price, but only if the
      new item is clearly better (SELL_GAIN); otherwise the purchase can't happen in this sequence. */
-  const evaluate = seq => {
+  /* Your slots: never fewer than the items you hold (v2.8.7). Holding more than the slots is impossible in the game, so it
+     means the slot count or the item list is out of date (in a recorded McGinnis match, an item marked bought while its
+     planned sale wasn't: 12 items in 11 slots for 4 minutes). Planning as if over the limit made every purchase need two
+     sales, so the buy order shrank to two steps. */
+  const cap = Math.max(slotCap, owned.size);
+  /* late: also plan sales after the next two purchases (v2.8.7). The plan is chosen without them (a sale planned further
+     ahead is a guess that rarely survives the match); they're used only to fill the rest of the list when your slots are
+     full, so you see what comes next instead of a two-step plan. Only items you own now can be sold in those steps. */
+  const evaluate = (seq, late = false) => {
     const have = new Set(owned); let spent = 0; const T = [], costs = [], sells = [], blocked = new Set(), usedUp = [];
     // What you'd be holding: owned items, then planned ones. rate = value per second, seq = index in the plan.
     /* rate: what keeping an owned item is worth when deciding a sale (with v2.8.6's purchase memory and part protection);
@@ -1392,7 +1403,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
       // A part bought after the upgrade it builds into does nothing for that upgrade: not a real step.
       if (seq.slice(0, i).some((y, j) => !blocked.has(j) && consumes(y, x))) { blocked.add(i); T.push(Infinity); costs.push(0); return; }
       const activeNeed = it.is_active_item && [...hold].filter(([id, h]) => h.item?.is_active_item && !used.includes(id)).length >= activeCap;
-      let needSlot = hold.size - used.length + 1 > slotCap;
+      let needSlot = hold.size - used.length + 1 > cap;
       let refund = 0;
       if (needSlot || activeNeed) {
         /* A sale only when it clearly pays: only to make room for something at least as expensive as what's sold,
@@ -1404,7 +1415,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
         // stats, so it needs a much bigger gain: the item sold has to be clearly doing little for you. So does selling
         // something you bought in the last RECENT_HOLD_S (v2.8.6): changing your mind that quickly needs a clear reason.
         const needFor = ([id, h]) => (it.cost || 0) >= 2 * (h.item?.cost || 0) && !(h.seq < 0 && (ownedInfo.get(id)?.recent?.ago ?? Infinity) <= RECENT_HOLD_S) ? SELL_GAIN : SELL_SIDEWAYS_GAIN;
-        const pick = i <= 1 ? [...hold].filter(([id, h]) => !used.includes(id) && (!activeNeed || h.item?.is_active_item) && (h.item?.cost || 0) <= (it.cost || 0))
+        const pick = i <= 1 || late ? [...hold].filter(([id, h]) => !used.includes(id) && (i <= 1 || h.seq < 0) && (!activeNeed || h.item?.is_active_item) && (h.item?.cost || 0) <= (it.cost || 0))
           .sort((a, b) => a[1].rate * needFor(a) - b[1].rate * needFor(b))[0] : null;
         const need = pick ? needFor(pick) : SELL_GAIN;
         if (!pick || pick[1].rate * need > newRate || newRate - pick[1].rate < SELL_MIN_GAIN) { blocked.add(i); T.push(Infinity); costs.push(0); return; }
@@ -1494,8 +1505,26 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
   }
   // A repurchased part only makes sense if its upgrade made it into the plan.
   for (let i = chosen.length - 1; i >= 0; i--) if (chosen[i].covered && !chosen.slice(i + 1).some(y => consumes(y, chosen[i]))) chosen.splice(i, 1);
+  /* Full slots (v2.8.7): when nothing more fits without a sale beyond the next two purchases, the rest of the list is filled
+     with steps that need one ("if your slots are still full"), judged by the same sale rules. The steps already chosen don't
+     change. Up to v2.8.6 the list stopped at two in most of a late game (Moppy's McGinnis match, October 14). */
+  const firstLate = chosen.length;
+  for (let step = chosen.length; step < maxSteps && remaining.length; step++) {
+    const have = new Set([...owned, ...chosen.map(x => x.s.item.id)]);
+    let best = null, bestV = -Infinity;
+    for (const x of remaining) {
+      if (chosen.some(y => consumes(y, x)) || x.covered) continue;
+      const rest = remaining.filter(y => y !== x && !consumes(x, y)).sort((a, b) => density(b, have) - density(a, have)).slice(0, maxSteps + 2);
+      const ev = evaluate([...chosen, x, ...rest], true);
+      if (ev.blocked.has(chosen.length)) continue;
+      if (ev.v > bestV) { bestV = ev.v; best = x; }
+    }
+    if (!best) break;
+    chosen.push(best);
+    remaining = remaining.filter(x => x !== best && !consumes(best, x));
+  }
   // Costs, timing and the reason for each step's place.
-  const { T, costs, sells } = evaluate(chosen);
+  const { T, costs, sells } = evaluate(chosen, chosen.length > firstLate);
   let running = 0;
   chosen.forEach((x, i) => {
     const cost = costs[i]; running += cost - (sells[i]?.refund || 0);
@@ -1535,12 +1564,13 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     }
     if (sells[i]) {
       st.sell = sells[i];
+      if (i >= firstLate) st.sell.later = true;
       const rec = ownedInfo.get(sells[i].id)?.recent;
       st.sell.recent = rec || null;
       // Selling something you bought minutes ago (v2.8.6): only when the new item is clearly worth much more, even counting
       // the sold item at what it was worth when you bought it; said plainly.
       const why = rec ? ` You bought it ${rec.ago < 60 ? "under a minute" : Math.round(rec.ago / 60) + " min"} ago, but ${x.s.item.name} is worth about ${(Math.round(rateOf(x) / Math.max(1e-9, sells[i].rate) * 10) / 10).toFixed(1)} times as much to you now, even counting ${sells[i].item?.name || "it"} at what it was worth when you bought it.` : ` It's worth much less to you now than ${x.s.item.name}.`;
-      st.plan = `Your slots are full: sell ${sells[i].item?.name || "your weakest item"} first (you get back ${sells[i].refund.toLocaleString()} souls, half its price).${why}` + (st.plan ? " " + st.plan : "");
+      st.plan = `${i >= firstLate ? "Later, if your slots are still full" : "Your slots are full"}: sell ${sells[i].item?.name || "your weakest item"} first (you get back ${sells[i].refund.toLocaleString()} souls, half its price).${why}` + (st.plan ? " " + st.plan : "");
     }
     steps.push(st);
   });
@@ -4182,7 +4212,7 @@ function selectable(el, entry) {
 /* Marks on a buy-order step that change what you do: a sale first, or a deliberate repurchase. */
 function stepMarks(entry) {
   const out = [];
-  if (entry.sell) { const m = document.createElement("span"); m.className = "tag-sell"; m.textContent = `Sell ${entry.sell.item?.name || "an item"} first (+${entry.sell.refund.toLocaleString()}) · `; out.push(m); }
+  if (entry.sell) { const m = document.createElement("span"); m.className = "tag-sell"; m.textContent = `${entry.sell.later ? "If slots are still full: sell" : "Sell"} ${entry.sell.item?.name || "an item"} first (+${entry.sell.refund.toLocaleString()}) · `; out.push(m); }
   if (entry.exception) { const m = document.createElement("span"); m.className = "tag-ex"; m.textContent = "Repurchase · "; out.push(m); }
   // How this step fits an upgrade path, at a glance.
   const pathMark = entry.upgrade ? "Upgrade · " : entry.path?.kind === "direct" ? "Outright · " : entry.why?.startsWith("Builds into") ? "Part first · " : "";
@@ -4800,19 +4830,33 @@ function renderSkipped() {
 function markBought(it, cost) {
   if (S.skipped?.[it.id]) delete S.skipped[it.id];   // bought after all: no longer skipped
   logEvent("buy", { id: it.id, cost, via: "marked", planPos: (S.view?.order || []).findIndex(st => st.s.item.id === it.id), souls: soulsNow() });
-  undoState = { owned: [...S.owned], souls: soulsNow(), pendingPushed: false };
+  /* A plan step that sells something first (slots full): marking it bought marks the sale too (v2.8.7). Up to v2.8.6 only the
+     new item was added, so the tool counted more items than slots (12 in 11 in a recorded McGinnis match) until the live data
+     caught up, and the buy order shrank to two steps. */
+  const step = (S.view?.order || []).find(st => st.s.item.id === it.id);
+  const sale = step?.sell && S.owned.has(step.sell.id) ? step.sell : null;
+  undoState = { owned: [...S.owned], souls: soulsNow(), pendingPushed: false, sold: sale ? sale.id : null };
+  if (sale) {
+    logEvent("remove", { id: sale.id, via: "planned sale" });
+    S.owned.delete(sale.id); (S.removedAt ||= {})[sale.id] = Date.now();
+    if (S.markedAt) delete S.markedAt[sale.id]; if (S.boughtAt) delete S.boughtAt[sale.id]; if (S.boughtInfo) delete S.boughtInfo[sale.id];
+    noteSold(sale.id, "you");
+  }
+  const net = cost - (sale ? sale.refund || 0 : 0);
   addOwned(it); (S.markedAt ||= {})[it.id] = Date.now(); if (S.removedAt) delete S.removedAt[it.id]; forgetSold(it.id);
-  if (!autoOn()) $("souls").value = Math.max(0, soulsNow() - cost);
-  if (soulBase()?.src === "live") { (S.pending ||= []).push({ cost, at: Date.now(), base: LIVE.souls }); undoState.pendingPushed = true; }
+  if (!autoOn()) $("souls").value = Math.max(0, soulsNow() - net);
+  if (soulBase()?.src === "live") { (S.pending ||= []).push({ cost: net, at: Date.now(), base: LIVE.souls }); undoState.pendingPushed = true; }
   S.dropped = [];   // the "bought one of these?" question is answered by any purchase you mark
   saveMatch(); renderItems(); renderResults(); updateSouls(true); renderBuildSearch();
-  showToast(`Bought ${it.name}. Recommendations updated.`, { undo: undoBought });
+  showToast(sale ? `Sold ${sale.item?.name || S.itemById[sale.id]?.name || "an item"} and bought ${it.name}. Recommendations updated.` : `Bought ${it.name}. Recommendations updated.`, { undo: undoBought });
 }
 function undoBought() {
   if (!undoState) return;
   logEvent("undo");
   for (const id of S.owned) if (!undoState.owned.includes(id) && S.markedAt) delete S.markedAt[id];
   if (undoState.pendingPushed && S.pending?.length) S.pending.pop();   // only the purchase being undone
+  // A sale marked with the purchase (v2.8.7) is undone with it: the item is yours again.
+  if (undoState.sold != null) { if (S.removedAt) delete S.removedAt[undoState.sold]; forgetSold(undoState.sold); (S.markedAt ||= {})[undoState.sold] = Date.now(); }
   S.owned = new Set(undoState.owned); if (!autoOn()) $("souls").value = undoState.souls; undoState = null;
   $("toast").hidden = true; saveMatch(); renderItems(); renderResults(); updateSouls(true); renderBuildSearch();
 }
