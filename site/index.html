@@ -297,7 +297,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.9</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.9.1</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="reviewOpen" class="linkbtn small" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
@@ -521,10 +521,14 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.9";   // shown in the top bar and written into match records
+const VERSION = "v2.9.1";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.9.1", date: "October 15, 2026", items: [
+    "When a teammate already applies healing reduction or resist reduction, the tool suggests your own much less: in real matches a second one added little.",
+    "Checked against about 10,000 real matches, including a new rank range: everything else was confirmed or kept, so your buy order barely changes otherwise.",
+    "One fewer heavy request to the data service during a match."] },
   { v: "v2.9", date: "October 15, 2026", items: [
     "New: Review a match (top bar, and offered when a linked match ends). Your purchases next to what the tool suggested at that moment, plus anything worth a look: souls left unspent while alive, sales at a loss, items bought late, an Egg never hatched.",
     "Recommendations retuned from about 7,000 real matches: the statistics for each stage of the match were trusted more than they deserved (especially late in the match), and what the live match needs counted too much. After the change, players who bought the tool's suggestions won more often than their team's lead predicted, in 13 of 14 hero and rank samples.",
@@ -611,6 +615,9 @@ const TAU_ITEM = 0.02;       // real difference between items of the same price 
 const TAU_FIT = 0.01;        // pairs well or badly with an item you own (not measured yet)
 const trust = (se, tau) => tau * tau / (tau * tau + se * se);
 const SINGLE_Z = 2.13;       // a counter to ONE enemy must clear this: 90% confidence after allowing for testing 6 enemies
+/* Tested on the v2.9.1 backtest: planning 7 or 15 minutes ahead instead of 10 changed nothing measurable (advice edge +0.02 and
+   0.00); buying the equally good item as soon as it's sooner (SOONER_S 0) helped slightly (+0.09) but made the next buy change
+   more often in quiet minutes (+1.7 points in every sample), so both are kept. */
 const PLAN_HORIZON_S = 600;  // plan at least 10 minutes ahead...
 const PLAN_HORIZON_MAX_S = 1500;   // ...and at most 25: items pay off until the match ends (planHorizon)
 const GENERIC_PER_SOUL = 0.006 / 1000;   // any item's stats are worth something: about +0.6 win-rate points per 1,000 souls
@@ -623,9 +630,10 @@ const TIMING_GAP = 0.015;    // a 1.5-point difference between stages counts as 
 const BASE_SLOTS = 9;
 const FLEX_SLOTS_MAX = 3;
 const MAX_ACTIVE = 4;
-/* Pair-based build fit (v2.8.2, see pairFit): computed and recorded, but not used yet (on: false). At half weight (w) it
-   changed the next buy at 54% of moments in replays of real matches: too big a change before the v2.9 backtest can
-   judge it. Replays and tests can switch it on. */
+/* Pair-based build fit (v2.8.2, see pairFit): built, but not used (on: false). At half weight (w) it changed the next buy at
+   54% of moments in replays of recorded matches. Tested on the v2.9.1 backtest (real matches, statistics from before them):
+   with pairs, build fit still predicted nothing (slope -0.10, between -0.29 and 0.14), and agreement with winners and the
+   advice edge both dipped. So it stays off, and recording no longer fetches pairs. Replays and tests can switch it on. */
 const PAIR_FIT = { on: false, w: 0.5 };
 /* Planned purchases valued at the stage they'll be bought in (v2.8.6, see buildOrder's rateAt): built and tested, but not used
    yet (on: false). In replays of 19 recorded matches it changed the next buy at 40% of moments and made the plan change
@@ -659,8 +667,18 @@ const POP_REF = 0.10, POP_FLOOR = 0.002, POP_RARE_W = 0.01;
    counter, or what the live match needs), and favourable general statistics alone don't count. Read from the
    data for each hero, so a hero that really does buy cheap items late isn't affected. */
 const OUT_STAGE_SHARE = 0.10;
-const TEAM_STACK = 0.6;      // each teammate already applying a debuff (healing or resist reduction) shrinks the need: 1/(1 + 0.6 x teammates)
+/* Each teammate already applying a debuff (healing or resist reduction) shrinks the need: 1/(1 + 3 x teammates), so one
+   teammate leaves a quarter of it. Measured on the v2.9.1 backtest (real matches at three rank ranges): without this discount
+   what the match needs predicted wins much less (slope 0.37 instead of 0.85) and the advice did worse; a stronger discount
+   than v2.6's 0.6 predicted a little better at both rank ranges tested (0.6 -> 1.5 -> 3: 0.85 -> 1.02 -> 1.10, and 2.3 -> 2.6 -> 2.7
+   on the holdout). The game stacks these debuffs, but a second one adds little in real matches. */
+const TEAM_STACK = 3;
 const SELL_REFUND = 0.5;     // selling returns half the price (deadlock.wiki/Items; a full refund only inside the shop right after buying)
+/* Sales (v2.9.1 backtest, every minute with full slots in 7,000 real matches): when your slots are full, the tool's next two
+   steps include a sale at 99% of minutes, because the best item to buy is nearly always worth over 4 times the weakest one
+   you own. So these thresholds rarely decide anything, and outcomes can't judge them (players who sold in a minute did 2
+   points worse than the situation predicted, but they sell at the shop, often after a death). Kept. Players sell the item the
+   tool rates weakest 45% of the time (doing so went with +0.7 points, between -0.8 and +2.5: not clear). */
 const SELL_GAIN = 1.4;       // sell an item for a slot only if the new item is worth at least 1.4x as much to you...
 const SELL_MIN_GAIN = 0.004; // ...and at least 0.4 points more (so two weak items aren't swapped for a tiny gain)
 const SELL_SIDEWAYS_GAIN = 2; // for an item costing less than twice what's sold: at least twice as much
@@ -1057,9 +1075,14 @@ function enemyShifts(base, perEnemy) {
     return { enemyId, idx, shift: weightedMedian(diffs) };
   });
 }
-function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, threat = new Map(), covered = new Map(), laneRows = null }) {
+function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, threat = new Map(), covered = new Map(), laneRows = null, all = null }) {
   const base = new Map(baseline.map(r => [r.item_id, r]));
   const enemies = enemyShifts(base, perEnemy);
+  /* All-ranks counters (v2.9.1, with RANK_PRIOR.ctrCorr): the same comparison over every rank, blended with your rank's
+     (rankBlend). all: { baseline, perEnemy } at all ranks for this stage. */
+  const ctrCorr = typeof RANK_PRIOR.ctrCorr === "object" ? RANK_PRIOR.ctrCorr?.[phase] || 0 : RANK_PRIOR.ctrCorr || 0;
+  const allBase = RANK_PRIOR.on && ctrCorr && all?.baseline ? new Map(all.baseline.map(r => [r.item_id, r])) : null;
+  const allEn = allBase ? new Map(enemyShifts(allBase, all.perEnemy || []).map(x => [x.enemyId, x])) : new Map();
   /* Lane counters (v2.8): in the laning stage, statistics against a lane opponent from games where the buyer laned
      against that hero (same_lane_filter). There are fewer such games, so each item's lane result is blended with its
      whole-match result by sample size (laneBlend). */
@@ -1092,7 +1115,13 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
       const z = lift / se;
       const weight = (threat.get(enemyId) || 1) * (phase === "lane" && laneIds.has(enemyId) ? 2 : 1);
       vs.push({ enemyId, lift, z, n: r.matches, pe, shift, lane: laneInfo });
-      score += lift * trust(se, TAU_ENEMY) * weight;
+      const A = allEn.get(enemyId), ar = A?.idx.get(it.id), ab = allBase?.get(it.id);
+      if (ar && ab && ar.matches >= MIN_GAMES && ab.matches >= MIN_GAMES) {
+        const pa = wr(ar), pab = wr(ab), la = pa - pab - A.shift, ea = pa * (1 - pa) / ar.matches + pab * (1 - pab) / ab.matches;
+        const t2 = TAU_ENEMY * TAU_ENEMY;
+        score += rankBlend(lift, se * se, la, ea, Math.min(1, r.matches / ar.matches) * se * se, t2, t2, ctrCorr * t2) * weight;
+        vs[vs.length - 1].all = { lift: la, n: ar.matches };
+      } else score += lift * trust(se, TAU_ENEMY) * weight;
       num += weight * lift; den += (weight * se) ** 2;
       if (z > best) best = z;
     }
@@ -1160,7 +1189,29 @@ function mergeScored(lists) {
    buy them sooner. Each item's value is its adjusted win rate minus the stage average, shrunk for small
    samples. Comparing the stages also shows timing: items that do well early but badly when bought late. */
 const FLOW_COLS = ["0-9 min", "9-20 min", "20-30 min", "30+ min"];
-function flowLifts(nodes, tierOf = () => null) {
+/* All-ranks values as a guide for your rank's (v2.9.1, see rankBlend): built and tested, not used (on: false).
+   Measured on real statistics (7 heroes, three rank ranges as wide as "Automatic"): an item's stage value at a rank agrees
+   closely with its all-ranks value (corr: 0.5 to 0.96 by stage and rank; sdAll: how much all-ranks values differ), and for
+   counters the all-ranks numbers hold about ten times the information (an item's real edge against one enemy is about 0.4 to
+   0.5 points; your rank's numbers measure it with 3 points of noise, all ranks with 0.8).
+   Tested on the backtest (statistics from before the matches, and a holdout rank range not used to set anything):
+   - stage values (stage): agreement with winners +1.4 to +1.6 points, but the advice edge 0.2 points lower in both samples
+     (not significant), and on the holdout the values predicted wins no better than your rank's alone;
+   - counters (ctrCorr): only in the laning stage did they predict (later stages: no); there, the advice edge -0.04 and +0.22
+     (both within noise).
+   Neither is a clear improvement, so both stay off (each would cost extra requests). Replays and tests can switch them on.
+   sdRank: spread of true values at a rank (null: TAU_ITEM); per stage column. ctrCorr: per stage (lane, mid, late). */
+const RANK_PRIOR = { on: false, sdRank: null, sdAll: [0.029, 0.034, 0.04, 0.042], corr: [0.74, 0.62, 0.88, 0.85], ctrCorr: { lane: 0.75 } };
+/* The best estimate of an item's true value at your rank from two measurements: xb at your rank (sampling variance eb) and
+   xa at all ranks (variance ea, sharing the games of your rank: covariance ce). vb: how much true values vary at a rank
+   (TAU_ITEM squared), va: at all ranks, c: how much the two move together. With c = 0 it's the usual shrinkage of xb toward
+   zero (trust); with all ranks measured precisely and closely related, a thin rank's value moves toward the all-ranks one. */
+function rankBlend(xb, eb, xa, ea, ce, vb, va, c) {
+  const a = vb + eb, d = va + ea, b = c + ce, det = a * d - b * b;
+  if (!(det > 0)) return xb * vb / (vb + eb);
+  return ((vb * d - c * b) * xb + (c * a - vb * b) * xa) / det;
+}
+function flowLifts(nodes, tierOf = () => null, prior = null) {
   const cols = FLOW_COLS.length;
   const byCol = Array.from({ length: cols }, () => []);
   for (const n of nodes || []) if (n.column < cols && n.matches > 0 && Number.isFinite(n.adjusted_win_rate)) byCol[n.column].push(n);
@@ -1187,7 +1238,11 @@ function flowLifts(nodes, tierOf = () => null) {
     if (n.matches >= MIN_GAMES) {
       const raw = n.adjusted_win_rate - tierMean(c, tierOf(n.item_id)), p = n.adjusted_win_rate;
       const se = Math.sqrt(Math.max(0.01, p * (1 - p)) / n.matches);
-      e.cols[c] = { raw, lift: raw * trust(se, TAU_ITEM), n: n.matches, p, nw: n.avg_net_worth_at_buy };
+      // With all-ranks values (prior: flowLifts of the all-ranks statistics), a rank's value is blended with them (rankBlend).
+      const pa = RANK_PRIOR.on && RANK_PRIOR.stage !== false ? prior?.items?.get(n.item_id)?.cols?.[c] : null, sr = RANK_PRIOR.sdRank?.[c] ?? TAU_ITEM;
+      const lift = pa ? rankBlend(raw, se * se, pa.raw, pa.se * pa.se, Math.min(1, n.matches / pa.n) * se * se, sr * sr,
+        RANK_PRIOR.sdAll[c] ** 2, RANK_PRIOR.corr[c] * sr * RANK_PRIOR.sdAll[c]) : raw * trust(se, TAU_ITEM);
+      e.cols[c] = { raw, lift, n: n.matches, p, nw: n.avg_net_worth_at_buy, se, ...(pa ? { fromAll: pa.raw } : {}) };
     }
     items.set(n.item_id, e);
   }
@@ -1787,7 +1842,11 @@ function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyW
   return P;
 }
 
-const MECH_W = 0.012;   // a full-strength answer counts like a +1.2 point win-rate edge (v2.9 backtest; 3 points up to v2.8.7)
+/* A full-strength answer counts like a +1.2 point win-rate edge (3 points up to v2.8.7; set in v2.9 from the backtest: it
+   predicted wins at 0.37 of 3 points). Checked in v2.9.1 with 3,482 more players at another rank range (61-80): there it looked
+   worth more (2.3 times; pooled with v2.9's matches, 1.6 times, between 0.6 and 2.7), but counting it 1.5 times as much made the
+   advice no better in either set of matches (edge -0.07 and -0.06). Kept. */
+const MECH_W = 0.012;
 /* How much of an answer an item is (v2.8.6). Up to v2.8.5 any item with the effect counted in full: Echo Shard's 5% spirit
    resist answered "enemies build spirit damage" as strongly as Spirit Resilience's 30%, Healbane's 35% healing reduction as
    strongly as Spirit Burn's 70%. Now an answer counts in proportion to its number, against the strongest always-on item in the
@@ -1796,7 +1855,7 @@ const MECH_W = 0.012;   // a full-strength answer counts like a +1.2 point win-r
    stack per hit, and their numbers alone don't say how far. An effect with no number (described only) counts in full. */
 const SIZE_KEYS = { bulletRes: ["BulletResist", "BuffBulletResist", "BulletResistBelowThreshold"],
   spiritRes: ["TechResist", "BuffTechResist", "TechResistBelowThreshold", "TechArmorGain"], antiheal: ["HealAmpReceivePenaltyPercent"] };
-const ACTIVE_SHARE = 0.5;
+const ACTIVE_SHARE = 0.5;   // v2.9.1 backtest: 1 or 0.25 changed nothing measurable (few items), so kept
 function tagMagnitude(it, tag, keys = SIZE_KEYS[tag]) {
   if (!keys) return null;
   let m = 0;
@@ -1868,8 +1927,8 @@ function mechNeeds(P, heroName) {
     if (mine) { strength *= STACKS.has(tag) && P.myFrac?.has(tag) ? 1 - P.myFrac.get(tag) : OWN_LEFT[tag] ?? 1; why += `; you already have ${TAG_NAMES[tag]} (${mine})`; }
     if (strength > 0.05) needs[tag] = { strength: Math.min(1, strength), why };
   };
-  // Debuffs on the enemy (healing and resist reduction) are shared: teammates who already apply one cover part
-  // of the need, with diminishing returns, but never all of it (they can't be on every target all the time).
+  // Debuffs on the enemy (healing and resist reduction) are shared: teammates who already apply one cover most of the need
+  // (one leaves a quarter: TEAM_STACK, measured in v2.9.1), but never all of it (they can't be on every target all the time).
   const mates = tag => P.teamBy?.get(tag)?.size || 0;
   const teamF = tag => 1 / (1 + TEAM_STACK * mates(tag));
   const teamTxt = (tag, what) => mates(tag) ? `; ${mates(tag) === 1 ? "a teammate already applies" : mates(tag) + " teammates already apply"} ${what} (${[...P.teamBy.get(tag)].map(heroName).join(", ")})` : "";
@@ -1988,7 +2047,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const lists = ready.map(p => {
     const e = p.entry;
     return { w: p.w / wsum, scored: scoreItems({ baseline: e.baseline, perEnemy: e.ready ? e.perEnemy : [], items, owned, souls,
-      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, threat: threatW, covered, laneRows: p.laneRows || null }) };
+      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, threat: threatW, covered, laneRows: p.laneRows || null, all: p.all || e.all || null }) };
   });
   const merged = mergeScored(lists);
   // Stage value without the wealth bias, and timing (flow data; optional).
@@ -2049,7 +2108,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   // this, an item bought as a counter could be suggested for sale a few minutes later (Spirit Shredder, Graves).
   const ownCtr = new Map(mergeScored(ready.map((p, k) => ({ w: lists[k].w, scored: scoreItems({ baseline: p.entry.baseline,
     perEnemy: p.entry.ready ? p.entry.perEnemy : [], items: ownedItems, owned: new Set(), souls, itemByClass,
-    laneIds: lane, phase: p.phase, threat: threatW }) }))).map(x => [x.item.id, x.score || 0]));
+    laneIds: lane, phase: p.phase, threat: threatW, all: p.all || p.entry.all || null }) }))).map(x => [x.item.id, x.score || 0]));
   /* v2.8.6: an item is valued as owned the way it was valued as a purchase, so buying it doesn't make it look weak.
      - Stage value: the item's value at the stage you bought it (the statistics of players who bought it then, which cover the
        rest of their match). Up to v2.8.5 it was the average over all stages, so in a recorded Seven match Reactive Barrier was
@@ -2139,7 +2198,9 @@ const aliveAt = (p, t) => !(p.deaths || []).some(([d, len]) => t >= d && t < d +
 /* Run the engine for one player at the given game times, in order, carrying the plan and purchase memory from one moment to
    the next as the page does. st: the statistics, as the page holds them: { stages: { lane|mid|late: { baseline, perEnemy:
    { enemy: rows }, fit: { anchor: rows } } }, laneVs: { enemy: rows }, fl (flowLifts result with matchLen and lean),
-   curve, matchups: hero-counter rows }. G: { items, itemById, itemByClass, prog }. onMoment(info) gets each moment. */
+   curve, matchups: hero-counter rows, pairs (optional): { whole: whole-match item rows, pairs: item pair rows }, all (optional):
+   { stages: { lane|mid|late: { baseline, perEnemy } } } at all ranks }. G: { items,
+   itemById, itemByClass, prog }. onMoment(info) gets each moment. */
 function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abilities = [], slotCap = null, onMoment }) {
   const hero = p.hero;
   const enemies = match.players.filter(x => x.team !== p.team).map(x => x.hero);
@@ -2153,12 +2214,18 @@ function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abili
     let spent = 0; for (const id of owned) spent += G.itemById[id]?.cost || 0;
     const souls = Math.max(0, Math.round(((nw ?? 0) - spent) / 10) * 10);
     const roster = new Map(match.players.map(x => [x.hero, { team: x.team, items: [...heldAt(x, t, G.itemById, G.itemByClass).keys()], nw: nwAt(x, t) ?? 0 }]));
-    const anchors = [...owned].map(id => G.itemById[id]).filter(Boolean).sort((a, b) => b.cost - a.cost).slice(0, 3).map(i => i.id);
+    const byCost = [...owned].map(id => G.itemById[id]).filter(Boolean).sort((a, b) => b.cost - a.cost);
+    const anchors = byCost.slice(0, 3).map(i => i.id), others = byCost.slice(3).map(i => i.id);
+    // Item pairs for the items beyond your three most expensive, as the page does once PAIR_FIT is on (st.pairs: { whole, pairs }).
+    const pf = PAIR_FIT.on && st.pairs && others.length ? pairFit(st.pairs.whole, st.pairs.pairs, others) : null;
     const ready = phasePlan(t, phaseForSeconds(t)).map(pp => {
       const s = st.stages[pp.phase] || { baseline: [], perEnemy: {}, fit: {} };
       const perAnchor = anchors.filter(a => s.fit?.[a]).map(a => ({ anchorId: a, rows: s.fit[a] }));
+      const stageFit = perAnchor.length ? buildFit(s.baseline, perAnchor) : {};
+      const a = st.all?.stages?.[pp.phase];
       return { ...pp, entry: { ready: true, baseline: s.baseline, perEnemy: enemies.filter(e => s.perEnemy?.[e]).map(e => ({ enemyId: e, rows: s.perEnemy[e] })),
-        fitMap: perAnchor.length ? buildFit(s.baseline, perAnchor) : {} },
+        fitMap: pf ? mergeFits(stageFit, pf, anchors) : stageFit,
+        all: a ? { baseline: a.baseline, perEnemy: enemies.filter(e => a.perEnemy?.[e]).map(e => ({ enemyId: e, rows: a.perEnemy[e] })) } : null },
         laneRows: pp.phase === "lane" ? new Map([...laneIds].filter(e => st.laneVs?.[e]).map(e => [e, st.laneVs[e]])) : null };
     });
     const threat = threatWeights(st.matchups || [], hero, enemies), fed = fedWeights(roster, enemies);
@@ -2760,9 +2827,15 @@ function ensureFlow() {
   const [minB, maxB] = rankBounds();
   const q = new URLSearchParams({ hero_ids: S.me, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: timeWindow().from, min_matches: MIN_GAMES });
   const f = S.flow = { key, loading: true };
-  getJSON(`/v1/analytics/item-flow-stats?${q}`).then(res => {
+  // With a rank range, the same numbers over all ranks too (v2.9.1, RANK_PRIOR): they steady your rank's values. Optional:
+  // if they fail, your rank's values are used alone, as before.
+  const narrow = RANK_PRIOR.on && !(minB <= 0 && maxB >= 116);
+  const qa = new URLSearchParams({ hero_ids: S.me, min_unix_timestamp: timeWindow().from, min_matches: MIN_GAMES });
+  Promise.all([getJSON(`/v1/analytics/item-flow-stats?${q}`), narrow ? getJSON(`/v1/analytics/item-flow-stats?${qa}`).catch(() => null) : null]).then(([res, all]) => {
     if (S.flow !== f) return;
-    Object.assign(f, flowLifts(res.nodes, id => S.itemById[id]?.item_tier ?? null), { rawNodes: res.nodes, loading: false, ready: true, matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
+    const tierOf = id => S.itemById[id]?.item_tier ?? null;
+    const prior = Array.isArray(all?.nodes) && all.nodes.length ? flowLifts(all.nodes, tierOf) : null;
+    Object.assign(f, flowLifts(res.nodes, tierOf, prior), { rawNodes: res.nodes, allNodes: prior ? all.nodes : null, loading: false, ready: true, matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
     // How much your hero's players lean on gun vs spirit items, for when you own little yet.
     let w = 0, sp = 0;
     for (const n of res.nodes || []) { const it = S.itemById[n.item_id]; if (!it) continue; if (it.item_slot_type === "weapon") w += n.matches; if (it.item_slot_type === "spirit") sp += n.matches; }
@@ -2800,6 +2873,27 @@ async function refreshFit() {
     entry.fitMap = mergeFits(entry.stageFit, P ? pairFit(P.whole, P.pairs, others) : {}, anchors);
     renderResults();
   }
+}
+/* All-ranks counters (v2.9.1): for a stage where RANK_PRIOR.ctrCorr uses them (the laning stage) and a rank range, the same
+   statistics as the stage's over every rank: your hero's items and each enemy (7 requests), kept for the session. Optional:
+   until they arrive, or if they fail, your rank's counters are used alone. */
+function allRanksNow(phase) {
+  const cc = typeof RANK_PRIOR.ctrCorr === "object" ? RANK_PRIOR.ctrCorr?.[phase] || 0 : RANK_PRIOR.ctrCorr || 0;
+  const [minB, maxB] = rankBounds();
+  if (!RANK_PRIOR.on || !cc || !S.me || !S.enemies.length || (minB <= 0 && maxB >= 116)) return null;
+  const k = [S.me, [...S.enemies].sort().join(","), timeWindow().from, phase].join("|"), have = (S.allStats ||= {})[k];
+  if (have?.ready) return have;
+  if (have && !(have.failedAt && Date.now() - have.failedAt > 60000)) return null;   // loading, or failed a moment ago
+  const [fromS, toS] = PHASES[phase];
+  const q = new URLSearchParams({ hero_ids: S.me, min_unix_timestamp: timeWindow().from, min_matches: 1, min_bought_at_s: fromS, corrupted_items: "exclude" });
+  if (toS) q.set("max_bought_at_s", toS);
+  const e = S.allStats[k] = { key: k, phase };
+  const enemies = [...S.enemies];
+  Promise.all([getJSON(`/v1/analytics/item-stats?${q}`), ...enemies.map(x => getJSON(`/v1/analytics/item-stats?${q}&enemy_hero_ids=${x}`))]).then(([baseline, ...rest]) => {
+    if (!Array.isArray(baseline) || rest.some(r => !Array.isArray(r))) throw new Error("unexpected format");
+    Object.assign(e, { baseline, perEnemy: enemies.map((x, i) => ({ enemyId: x, rows: rest[i] })), ready: true }); renderResults();
+  }).catch(err => { e.failedAt = Date.now(); e.error = String(err?.message || err).slice(0, 120); });
+  return null;
 }
 /* Item pairs for your hero, rank and period (v2.8.2): one request for the pairs and one for whole-match item statistics,
    kept for the session. Only needed once you own more than three items. Until they arrive, or if they fail, the fit
@@ -4173,6 +4267,13 @@ function logSnapshot(view, ready) {
       const row = x => [x.item_id, x.wins, x.matches, x.players, Math.round(x.avg_buy_time_s || 0)];
       r.stats[e.key] = { phase: p.phase, query: e.q, baseline: e.baseline.map(row), perEnemy: e.perEnemy.map(pe => [pe.enemyId, pe.rows.map(row)]) };
     }
+    // All-ranks counters (v2.9.1), once per stage, so replays use them too.
+    for (const p of ready) {
+      if (!p.all?.ready) continue;
+      const row = x => [x.item_id, x.wins, x.matches, x.players, Math.round(x.avg_buy_time_s || 0)];
+      r.allStats ||= {};
+      if (!r.allStats[p.all.key]) r.allStats[p.all.key] = { phase: p.phase, baseline: p.all.baseline.map(row), perEnemy: p.all.perEnemy.map(pe => [pe.enemyId, pe.rows.map(row)]) };
+    }
     // Lane counters (v2.8): each lane opponent's lane-only statistics, once.
     for (const p of ready) {
       const st = r.stats[p.entry.key]; if (!st || !p.laneRows) continue;
@@ -4195,8 +4296,10 @@ function logSnapshot(view, ready) {
         for (const a of own) if (!r.pairs.anchors[a]) r.pairs.anchors[a] = PS.pairs.filter(x => (x.item_ids || []).includes(a)).map(x => [x.item_ids[0], x.item_ids[1], x.wins, x.matches]);
       }
     }
-    if (!r.flow && S.flow?.ready && S.flow.rawNodes) r.flow = { key: S.flow.key, matchLen: S.flow.matchLen,
-      nodes: S.flow.rawNodes.map(n => [n.column, n.item_id, n.wins, n.losses, n.matches, n.players, n.adjusted_win_rate, Math.round(n.avg_net_worth_at_buy || 0)]) };
+    const flowRow = n => [n.column, n.item_id, n.wins, n.losses, n.matches, n.players, n.adjusted_win_rate, Math.round(n.avg_net_worth_at_buy || 0)];
+    if (!r.flow && S.flow?.ready && S.flow.rawNodes) r.flow = { key: S.flow.key, matchLen: S.flow.matchLen, nodes: S.flow.rawNodes.map(flowRow) };
+    // The all-ranks stage values that guided your rank's (v2.9.1), so replays can use them too.
+    if (!r.flowAll && S.flow?.ready && S.flow.allNodes && r.flow?.key === S.flow.key) r.flowAll = { nodes: S.flow.allNodes.map(flowRow) };
     if (sig === LOG.lastSnapSig || r.snaps.length >= LOG_MAX_SNAPS) return;
     LOG.lastSnapSig = sig;
     const top = k => view.groups[k].slice(0, 5).map(s => s.item.id);
@@ -4368,11 +4471,23 @@ async function reviewStats(hero, enemies, laneIds, anchors) {
     for (const e of enemies) jobs.push(() => getJSON(q({ ...pq, enemy_hero_ids: e })).then(r => { s.perEnemy[e] = r; }));
     for (const a of anchors) jobs.push(() => getJSON(q({ ...pq, include_item_ids: a })).then(r => { s.fit[a] = r; }).catch(() => {}));
   }
+  // All-ranks counters for the stages that use them (v2.9.1, RANK_PRIOR.ctrCorr), as the page does. Optional.
+  const all = { stages: {} };
+  if (RANK_PRIOR.on && !(minB <= 0 && maxB >= 116)) for (const [phase, [fromS, toS]] of Object.entries(PHASES)) {
+    if (!(typeof RANK_PRIOR.ctrCorr === "object" ? RANK_PRIOR.ctrCorr?.[phase] : RANK_PRIOR.ctrCorr)) continue;
+    const pq = { hero_ids: hero, min_unix_timestamp: from, min_matches: 1, corrupted_items: "exclude", min_bought_at_s: fromS }; if (toS) pq.max_bought_at_s = toS;
+    const s = all.stages[phase] = { baseline: [], perEnemy: {} };
+    jobs.push(() => getJSON(q(pq)).then(r => { s.baseline = r; }).catch(() => {}));
+    for (const e of enemies) jobs.push(() => getJSON(q({ ...pq, enemy_hero_ids: e })).then(r => { s.perEnemy[e] = r; }).catch(() => {}));
+  }
   const laneVs = {};
   for (const e of laneIds) jobs.push(() => getJSON(q({ ...base, min_bought_at_s: 0, max_bought_at_s: 540, enemy_hero_ids: e, same_lane_filter: "true" })).then(r => { laneVs[e] = r; }).catch(() => {}));
   let fl = null, curve = [], matchups = [];
-  jobs.push(() => getJSON(`/v1/analytics/item-flow-stats?${new URLSearchParams({ hero_ids: hero, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from, min_matches: MIN_GAMES })}`).then(res => {
-    fl = Object.assign(flowLifts(res.nodes, id => S.itemById[id]?.item_tier ?? null), { matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
+  const narrow = RANK_PRIOR.on && !(minB <= 0 && maxB >= 116);
+  jobs.push(() => Promise.all([getJSON(`/v1/analytics/item-flow-stats?${new URLSearchParams({ hero_ids: hero, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from, min_matches: MIN_GAMES })}`),
+    narrow ? getJSON(`/v1/analytics/item-flow-stats?${new URLSearchParams({ hero_ids: hero, min_unix_timestamp: from, min_matches: MIN_GAMES })}`).catch(() => null) : null]).then(([res, all]) => {
+    const tierOf = id => S.itemById[id]?.item_tier ?? null;
+    fl = Object.assign(flowLifts(res.nodes, tierOf, all?.nodes?.length ? flowLifts(all.nodes, tierOf) : null), { matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
     let w = 0, sp = 0; for (const n of res.nodes || []) { const it = S.itemById[n.item_id]; if (!it) continue; if (it.item_slot_type === "weapon") w += n.matches; if (it.item_slot_type === "spirit") sp += n.matches; }
     fl.lean = w + sp ? { weapon: w / (w + sp), spirit: sp / (w + sp) } : null;
   }).catch(() => {}));
@@ -4383,7 +4498,7 @@ async function reviewStats(hero, enemies, laneIds, anchors) {
   // Six at a time: well within the data service's limit of 200 statistics requests a minute.
   let done = 0;
   for (let i = 0; i < jobs.length; i += 6) { await Promise.all(jobs.slice(i, i + 6).map(f => f())); done += Math.min(6, jobs.length - i); reviewStatus(`Fetching the statistics the tool would have used… ${done} of ${jobs.length}`); }
-  return { stages, laneVs, fl, curve, matchups };
+  return { stages, all, laneVs, fl, curve, matchups };
 }
 async function runReview() {
   if (REVIEW.busy) return;
@@ -4780,8 +4895,9 @@ function renderResultsInner() {
   }
   const ready = plan.map(p => ({ ...p, entry: S.cache[dataKey(p.phase)] })).filter(p => p.entry && (p.entry.ready || p.entry.baseReady));
   for (const p of ready) if (p.phase === "lane" && p.entry.ready) p.laneRows = laneRowsNow();
+  for (const p of ready) if (p.entry.ready) p.all = allRanksNow(p.phase);   // all-ranks counters (v2.9.1), where they're used
   // Item pairs: fetched while recording (kept in the match record for testing), or when they're used (PAIR_FIT.on).
-  if (S.me && S.owned.size && (LOG.on || PAIR_FIT.on)) pairsNow();
+  if (S.me && S.owned.size && PAIR_FIT.on) pairsNow();   // up to v2.9 also while recording, for testing: tested in v2.9.1, not used
   const prelim = ready.some(p => !p.entry.ready);
   if (!ready.length) {
     // Never blank the board while new data loads: keep the last buy order and say it's updating.
