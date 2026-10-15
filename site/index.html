@@ -294,7 +294,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.8.5</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.8.6</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
@@ -508,10 +508,16 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.8.5";   // shown in the top bar and written into match records
+const VERSION = "v2.8.6";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.8.6", date: "October 14, 2026", items: [
+    "Fixed: the tool could suggest selling an item seconds after suggesting you buy it. An item you just bought now keeps the value it had when you bought it for a few minutes, and selling it that soon needs a clearly better item (twice the value), with the reason shown.",
+    "No more sudden change at 30:00: the tool now blends gradually there, as it already did at 9:00 and 20:00.",
+    "Items that only give a little resist (Echo Shard, Fleetfoot, Superior Duration...) no longer count as a full answer to the enemy's damage type, and healing reduction counts by its strength (Spirit Burn's 70% more than Healbane's 35%). The details say \"partly\" when an item is only part of an answer.",
+    "A second healing reduction or resist reduction now counts for what it really adds: in the game they stack, so owning one no longer makes the next look nearly useless.",
+    "Heroes released in the last few days: when there are too few games near your rank, the tool uses every rank and says the suggestions are rough until more games come in."] },
   { v: "v2.8.5", date: "October 14, 2026", items: [
     "Fixed: when an enemy changed hero at the start of a match, the tool could keep the old hero on the enemy team and leave a real one out, so counters were worked out against the wrong heroes. It now keeps the six players really in the match.",
     "Spirit Resilience is no longer suggested as an answer to enemy crowd control: it only gives spirit resist (the game's internal name for it was misread). Cheat Death no longer counts as healing reduction, and Nullification Burst now does.",
@@ -601,6 +607,11 @@ const MAX_ACTIVE = 4;
    changed the next buy at 54% of moments in replays of real matches: too big a change before the v2.9 backtest can
    judge it. Replays and tests can switch it on. */
 const PAIR_FIT = { on: false, w: 0.5 };
+/* Planned purchases valued at the stage they'll be bought in (v2.8.6, see buildOrder's rateAt): built and tested, but not used
+   yet (on: false). In replays of 19 recorded matches it changed the next buy at 40% of moments and made the plan change
+   11% more often, while the purchase memory alone already removed almost all "sell what you just bought" moments (45 -> 5).
+   Too big a change before v2.9's backtest can judge it. Replays and tests can switch it on. */
+const STAGE_AT_PURCHASE = { on: false };
 const POP_PRIOR = 0.002;     // popularity at this stage: weak evidence (at most +0.2 pts), breaks near-ties
 const RARE_STAGE_SHARE = 0.25;   // bought at this stage by under a quarter of the usual share -> "rarely bought this late"
 /* Items your hero rarely buys need stronger evidence. Few buyers means noisier numbers, the players who pick an
@@ -638,7 +649,7 @@ const store = {
 let lastMatchSave = { sig: null, at: 0 };
 function saveMatch() {
   const m = { enemies: S.enemies, lane: [...S.lane], owned: [...S.owned], souls: soulsNow(),
-    phase: S.phase, clockStart: S.clockStart, clockStartedOnce: !!S.clockStartedOnce, soulOffset: S.soulOffset, windowFrom: S.windowFrom ?? null, prevOrder: S.prevOrder, sold: S.sold, markedAt: S.markedAt, removedAt: S.removedAt, boughtAt: S.boughtAt || {}, flexManual: S.flexManual || 0, skipped: S.skipped || {}, active: S.active, matchId: S.matchId || null, lastMatchId: S.lastMatchId || null, clockAdjust: S.clockAdjust || 0, handEnemies: !!S.handEnemies, deaths: S.deaths || [] };
+    phase: S.phase, clockStart: S.clockStart, clockStartedOnce: !!S.clockStartedOnce, soulOffset: S.soulOffset, windowFrom: S.windowFrom ?? null, prevOrder: S.prevOrder, sold: S.sold, markedAt: S.markedAt, removedAt: S.removedAt, boughtAt: S.boughtAt || {}, boughtInfo: S.boughtInfo || {}, flexManual: S.flexManual || 0, skipped: S.skipped || {}, active: S.active, matchId: S.matchId || null, lastMatchId: S.lastMatchId || null, clockAdjust: S.clockAdjust || 0, handEnemies: !!S.handEnemies, deaths: S.deaths || [] };
   const sig = JSON.stringify(m), now = Date.now();
   if (sig === lastMatchSave.sig && now - lastMatchSave.at < 60000) return;
   lastMatchSave = { sig, at: now };
@@ -1319,7 +1330,7 @@ function groupRecs(scored) {
    it gives more per soul, and saving wins when the expensive item's edge per soul is bigger. The plan is
    built greedily, checking each choice against the rest of the plan. */
 function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById = new Map(), maxSteps = 4, rate = 12, horizon = PLAN_HORIZON_S,
-  covered = new Map(), slotCap = Infinity, activeCap = Infinity, ownedRates = new Map(), itemById = {}, nwNow = null, exclude = new Set() } = {}) {
+  covered = new Map(), slotCap = Infinity, activeCap = Infinity, ownedRates = new Map(), ownedInfo = new Map(), itemById = {}, nwNow = null, exclude = new Set(), sec0 = null } = {}) {
   const kindOf = new Map([...groups.core.map(s => [s.item.id, "core"]), ...groups.situational.map(s => [s.item.id, "weak"]),
     ...groups.build.map(s => [s.item.id, "build"]), ...groups.counters.map(s => [s.item.id, "counter"])]);
   const pool = new Map();
@@ -1338,6 +1349,18 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
   // Owning an item never loses value compared with unspent souls, so even a below-average item keeps a
   // quarter of its stats' worth (this lets a weak part be bought on the way to a strong upgrade).
   const rateOf = x => { const g = statsValue(x.s); return Math.max(0.25 * g, g + itemValue(x.s)) * (x.s.timing?.factor ?? 1) * (x.covered ? 0.5 : 1); };
+  /* The same, for an item bought T seconds from now (v2.8.6): its stage value is the one for the stage it will be bought in
+     (the statistics of players who bought it then). Up to v2.8.5 a purchase planned for later was valued at today's stage,
+     so at 29:00 in a recorded Seven match the plan saved for Infuser (+2.2 points at 20-30 min) though it would be bought
+     after 30:00 (-0.5 points), then dropped it at 30:00, leaving the part just bought toward it. Rounded to 30 s, cached. */
+  const rateCache = new Map();
+  const rateAt = (x, T) => {
+    if (sec0 == null || !x.s.adjAt || !Number.isFinite(T)) return rateOf(x);
+    const t = Math.round((sec0 + T) / 30) * 30, k = x.s.item.id + ":" + t + (x.covered ? "c" : "");
+    let r = rateCache.get(k);
+    if (r == null) { const s2 = { ...x.s, adj: x.s.adjAt(t) }; const g = statsValue(s2); r = Math.max(0.25 * g, g + itemValue(s2)) * (x.s.timing?.factor ?? 1) * (x.covered ? 0.5 : 1); rateCache.set(k, r); }
+    return r;
+  };
   const r = Math.max(1, rate);
   /* How much owning an item from time a to time b is worth, per unit of its value rate. Without your net worth
      it's simply the time owned. With it, each second is weighted by how big the item is compared with your
@@ -1359,7 +1382,11 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
   const evaluate = seq => {
     const have = new Set(owned); let spent = 0; const T = [], costs = [], sells = [], blocked = new Set(), usedUp = [];
     // What you'd be holding: owned items, then planned ones. rate = value per second, seq = index in the plan.
-    const hold = new Map([...owned].map(id => [id, { rate: ownedRates.get(id) ?? GENERIC_PER_SOUL * (itemById[id]?.cost || 0) * 0.5, item: itemById[id], seq: -1 }]));
+    /* rate: what keeping an owned item is worth when deciding a sale (with v2.8.6's purchase memory and part protection);
+       use: what it gives on its own, which is what an upgrade that uses it up takes away. The protections are about not
+       throwing away a purchase or a step toward an upgrade; upgrading carries both forward, so it doesn't pay for them. */
+    const hold = new Map([...owned].map(id => { const r = ownedRates.get(id) ?? GENERIC_PER_SOUL * (itemById[id]?.cost || 0) * 0.5;
+      return [id, { rate: r, use: Math.min(r, ownedInfo.get(id)?.base ?? r), item: itemById[id], seq: -1 }]; }));
     seq.forEach((x, i) => {
       const it = x.s.item, used = partsOf(it).filter(id => hold.has(id));
       // A part bought after the upgrade it builds into does nothing for that upgrade: not a real step.
@@ -1373,11 +1400,13 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
            match), and only if the new item is worth clearly more (SELL_GAIN times as much, and SELL_MIN_GAIN more
            a second). Otherwise the purchase waits: keeping a good build is a fine outcome. */
         const newRate = rateOf(x);
-        const pick = i <= 1 ? [...hold].filter(([id, h]) => !used.includes(id) && (!activeNeed || h.item?.is_active_item) && (h.item?.cost || 0) <= (it.cost || 0))
-          .sort((a, b) => a[1].rate - b[1].rate)[0] : null;
         // A swap for an item of about the same price (less than twice what's sold) costs half the price for no new
-        // stats, so it needs a much bigger gain: the item sold has to be clearly doing little for you.
-        const need = pick && (it.cost || 0) >= 2 * (pick[1].item?.cost || 0) ? SELL_GAIN : SELL_SIDEWAYS_GAIN;
+        // stats, so it needs a much bigger gain: the item sold has to be clearly doing little for you. So does selling
+        // something you bought in the last RECENT_HOLD_S (v2.8.6): changing your mind that quickly needs a clear reason.
+        const needFor = ([id, h]) => (it.cost || 0) >= 2 * (h.item?.cost || 0) && !(h.seq < 0 && (ownedInfo.get(id)?.recent?.ago ?? Infinity) <= RECENT_HOLD_S) ? SELL_GAIN : SELL_SIDEWAYS_GAIN;
+        const pick = i <= 1 ? [...hold].filter(([id, h]) => !used.includes(id) && (!activeNeed || h.item?.is_active_item) && (h.item?.cost || 0) <= (it.cost || 0))
+          .sort((a, b) => a[1].rate * needFor(a) - b[1].rate * needFor(b))[0] : null;
+        const need = pick ? needFor(pick) : SELL_GAIN;
         if (!pick || pick[1].rate * need > newRate || newRate - pick[1].rate < SELL_MIN_GAIN) { blocked.add(i); T.push(Infinity); costs.push(0); return; }
         const [sid, sh] = pick;
         refund = Math.round((sh.item?.cost || 0) * SELL_REFUND);
@@ -1388,9 +1417,9 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
       spent += c - refund; costs.push(c);
       // +1 s per place: when several items are affordable at once, the bigger value goes first.
       T.push(Math.max(0, spent - souls) / r + T.length);
-      for (const id of used) { const h = hold.get(id); if (h) usedUp.push({ seq: h.seq, rate: h.rate, at: i }); hold.delete(id); have.delete(id); }
+      for (const id of used) { const h = hold.get(id); if (h) usedUp.push({ seq: h.seq, rate: h.use ?? h.rate, at: i }); hold.delete(id); have.delete(id); }
       for (const cls of it.component_items || []) { const p = itemByClass[cls]; if (p) have.delete(p.id); }
-      have.add(it.id); hold.set(it.id, { rate: rateOf(x), item: it, seq: i });
+      have.add(it.id); hold.set(it.id, { rate: rateAt(x, T[i]), item: it, seq: i });
     });
     let v = 0;
     for (const s of sells) if (s && s.seq < 0) { const Ts = T[sells.indexOf(s)]; v -= s.rate * W(Ts, horizon); }   // an owned item sold: its value from then on is lost
@@ -1405,7 +1434,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
       let end = horizon;
       for (let j = i + 1; j < seq.length; j++) if (!blocked.has(j) && (consumes(seq[j], x) || sells[j]?.seq === i)) { end = Math.min(end, T[j]); break; }
       if (x.covered && end >= horizon) return;   // a repurchased part is only worth something as the step to its upgrade
-      v += rateOf(x) * W(T[i], end);
+      v += rateAt(x, T[i]) * W(T[i], end);
     });
     /* Souls the sequence doesn't spend aren't worthless: they'd go on something else. Count them at the value of
        an average item's stats from when they're earned, so a plan isn't better just because it lists more items. */
@@ -1472,6 +1501,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     const cost = costs[i]; running += cost - (sells[i]?.refund || 0);
     const st = { s: { ...x.s, cost }, kind: x.kind, cumulative: running, affordable: running <= souls, eta: T[i], value: itemValue(x.s), perSoul: density(x, new Set(owned)) };
     const into = chosen.slice(i + 1).find(y => consumes(y, x));
+    if (into) st.into = into.s.item.id;
     if (into) { st.why = `Builds into ${into.s.item.name}`; st.plan = `Part of ${into.s.item.name}: the souls count toward it, and you get its stats while you save.`; if (x.kind === "core") st.kind = "part"; }
     // An upgrade of something you already own (or plan to buy first): only the difference is paid.
     const fromId = partsOf(x.s.item).find(id => owned.has(id) || chosen.slice(0, i).some(y => y.s.item.id === id));
@@ -1505,7 +1535,12 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     }
     if (sells[i]) {
       st.sell = sells[i];
-      st.plan = `Your slots are full: sell ${sells[i].item?.name || "your weakest item"} first (you get back ${sells[i].refund.toLocaleString()} souls, half its price). It's worth much less to you now than ${x.s.item.name}.` + (st.plan ? " " + st.plan : "");
+      const rec = ownedInfo.get(sells[i].id)?.recent;
+      st.sell.recent = rec || null;
+      // Selling something you bought minutes ago (v2.8.6): only when the new item is clearly worth much more, even counting
+      // the sold item at what it was worth when you bought it; said plainly.
+      const why = rec ? ` You bought it ${rec.ago < 60 ? "under a minute" : Math.round(rec.ago / 60) + " min"} ago, but ${x.s.item.name} is worth about ${(Math.round(rateOf(x) / Math.max(1e-9, sells[i].rate) * 10) / 10).toFixed(1)} times as much to you now, even counting ${sells[i].item?.name || "it"} at what it was worth when you bought it.` : ` It's worth much less to you now than ${x.s.item.name}.`;
+      st.plan = `Your slots are full: sell ${sells[i].item?.name || "your weakest item"} first (you get back ${sells[i].refund.toLocaleString()} souls, half its price).${why}` + (st.plan ? " " + st.plan : "");
     }
     steps.push(st);
   });
@@ -1655,8 +1690,8 @@ function fedWeights(roster, enemies) {
 }
 
 /* Sum up what the enemy team and your teammates have built. */
-function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyWeight }) {
-  const P = { sustain: [], cc: [], bulletRes: [], spiritRes: [], weaponCost: 0, spiritCost: 0, teamHas: new Set(), teamItems: new Set(), myWeapon: 0, mySpirit: 0, myHas: new Map() };
+function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyWeight, refs = null }) {
+  const P = { sustain: [], cc: [], bulletRes: [], spiritRes: [], weaponCost: 0, spiritCost: 0, teamHas: new Set(), teamItems: new Set(), myWeapon: 0, mySpirit: 0, myHas: new Map(), myFrac: new Map(), refs };
   for (const [enemy, ids] of enemyItems) {
     const w = enemyWeight.get(enemy) || 1;
     for (const id of ids) {
@@ -1675,7 +1710,10 @@ function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyW
   }
   for (const id of myItems) {
     const it = itemById[id]; if (!it) continue;
-    for (const t of tagsOf(it)) if (!P.myHas.has(t)) P.myHas.set(t, it.name);
+    for (const t of tagsOf(it)) {
+      if (!P.myHas.has(t)) P.myHas.set(t, it.name);
+      if (STACKS.has(t)) P.myFrac.set(t, 1 - (1 - (P.myFrac.get(t) || 0)) * (1 - debuffFraction(it, t)));   // combined, as the game does
+    }
     if (it.item_slot_type === "weapon") P.myWeapon += it.cost || 0;
     if (it.item_slot_type === "spirit") P.mySpirit += it.cost || 0;
   }
@@ -1683,12 +1721,50 @@ function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyW
 }
 
 const MECH_W = 0.03;   // a full-strength answer counts like a +3 point win-rate edge
+/* How much of an answer an item is (v2.8.6). Up to v2.8.5 any item with the effect counted in full: Echo Shard's 5% spirit
+   resist answered "enemies build spirit damage" as strongly as Spirit Resilience's 30%, Healbane's 35% healing reduction as
+   strongly as Spirit Burn's 70%. Now an answer counts in proportion to its number, against the strongest always-on item in the
+   shop with that effect (read from the game data, so a patch moves it), and half for an active item, whose effect lasts only
+   while used (an assumption for v2.9's calibration). Resist reduction keeps counting in full for now: several of those items
+   stack per hit, and their numbers alone don't say how far. An effect with no number (described only) counts in full. */
+const SIZE_KEYS = { bulletRes: ["BulletResist", "BuffBulletResist", "BulletResistBelowThreshold"],
+  spiritRes: ["TechResist", "BuffTechResist", "TechResistBelowThreshold", "TechArmorGain"], antiheal: ["HealAmpReceivePenaltyPercent"] };
+const ACTIVE_SHARE = 0.5;
+function tagMagnitude(it, tag, keys = SIZE_KEYS[tag]) {
+  if (!keys) return null;
+  let m = 0;
+  for (const k of keys) { const v = Math.abs(parseFloat(it.properties?.[k]?.value)); if (v > m) m = v; }
+  return m > 0 ? m : null;
+}
+const REF_CACHE = new WeakMap();
+function tagRefs(items, tagsFn = it => tagsOf(it)) {
+  if (REF_CACHE.has(items)) return REF_CACHE.get(items);
+  const r = {};
+  for (const tag of Object.keys(SIZE_KEYS)) { let mx = 0; for (const it of items || []) if (!it.is_active_item && tagsFn(it).has(tag)) mx = Math.max(mx, tagMagnitude(it, tag) || 0); r[tag] = mx || null; }
+  REF_CACHE.set(items, r);
+  return r;
+}
+function tagSize(it, tag, refs) {
+  const m = tagMagnitude(it, tag), ref = refs?.[tag];
+  if (m == null || !ref) return 1;
+  return Math.min(1, m / ref) * (it.is_active_item ? ACTIVE_SHARE : 1);
+}
+/* Debuffs on the enemy that stack multiplicatively in the game (deadlock.wiki: two 40% healing reductions give 64%; resist
+   reductions are combined the same way before being subtracted): a second one adds (1 - what you already apply) of itself.
+   Its real fraction: the number, or 0.3 when there's none to read. */
+const STACKS = new Set(["antiheal", "bulletShred", "spiritShred"]);
+const SHRED_KEYS = { bulletShred: ["BulletArmorReduction", "BulletResistReduction"], spiritShred: ["MagicResistReduction", "TechArmorDamageReduction", "TechResistReduction"] };
+function debuffFraction(it, tag) {
+  const m = tag === "antiheal" ? tagMagnitude(it, tag) : tagMagnitude(it, tag, SHRED_KEYS[tag]);
+  return m != null ? Math.min(0.9, m / 100) : 0.3;
+}
 /* How much of this match's need is left when you already own an item that answers it: a second way out of crowd control
-   adds little while the first is ready, resist still adds up, and a second debuff on the enemy (healing or resist
-   reduction) is assumed to add little. That last part is an assumption: real item pairs show no general overlap for
-   those debuffs (v2.8.5), so only the need is reduced, not the item's general value; v2.9's backtest will check it.
+   adds little while the first is ready (measured, v2.8.5), and resist still adds up (extra bullet resist: mild diminishing
+   returns, -0.4 points in real pairs). Debuffs on the enemy that stack (healing and resist reduction) no longer use a fixed
+   share: from v2.8.6 what's left follows the game's stacking (see STACKS). Up to v2.8.5 they kept 25 to 30%, on the
+   assumption that they don't stack; the game stacks them multiplicatively and real pairs showed no overlap.
    Used for what the match needs (mechNeeds) and, for ways out of crowd control, an item's general value (overlapOf). */
-const OWN_LEFT = { antiheal: 0.25, cleanse: 0.3, bulletShred: 0.3, spiritShred: 0.3, bulletRes: 0.7, spiritRes: 0.7 };
+const OWN_LEFT = { cleanse: 0.3, bulletRes: 0.7, spiritRes: 0.7 };
 /* Items that do the same job as one you own (v2.8.5): ways out of crowd control. Measured on real item pairs (16 heroes,
    all ranks, October 2026): players who own two of Unstoppable, Indomitable and Dispel Magic do 1 to 2.6 points worse
    than with either item and another item of the same price, for 13 or 14 of 15 to 16 heroes (Divine Barrier with them:
@@ -1717,10 +1793,12 @@ function mechNeeds(P, heroName) {
   const names = list => [...new Set(list.map(x => heroName(x.enemy)))].slice(0, 3).join(", ");
   const sum = list => list.reduce((a, x) => a + x.w, 0);
   const needs = {};
-  // An answer you already own covers most of the need (debuffs like healing reduction don't stack).
+  // An answer you already own covers part of the need: for debuffs that stack (healing and resist reduction), what's left is
+  // 1 - the share you already apply (v2.8.6; up to v2.8.5 a fixed 25 to 30% was kept, "debuffs don't stack"); for the
+  // others, OWN_LEFT.
   const add = (tag, strength, why) => {
     const mine = P.myHas?.get(tag);
-    if (mine) { strength *= OWN_LEFT[tag] ?? 1; why += `; you already have ${TAG_NAMES[tag]} (${mine})`; }
+    if (mine) { strength *= STACKS.has(tag) && P.myFrac?.has(tag) ? 1 - P.myFrac.get(tag) : OWN_LEFT[tag] ?? 1; why += `; you already have ${TAG_NAMES[tag]} (${mine})`; }
     if (strength > 0.05) needs[tag] = { strength: Math.min(1, strength), why };
   };
   // Debuffs on the enemy (healing and resist reduction) are shared: teammates who already apply one cover part
@@ -1753,7 +1831,11 @@ function mechFor(it, needs, P, tagsOf) {
   const tags = tagsOf(it);
   let score = 0; const why = []; const warn = [];
   for (const [tag, n] of Object.entries(needs)) {
-    if (tags.has(tag)) { score += MECH_W * n.strength; why.push(`Answers ${n.why}`); }
+    if (!tags.has(tag)) continue;
+    const size = tagSize(it, tag, P.refs);
+    score += MECH_W * n.strength * size;
+    const m = SIZE_KEYS[tag] ? tagMagnitude(it, tag) : null;
+    why.push(`Answers ${n.why}` + (size < 0.95 && m != null ? ` (partly: ${m}% ${TAG_NAMES[tag]}${it.is_active_item ? " while active" : ""})` : ""));
   }
   if (tags.has("aura") && P.teamItems.has(it.id)) { score -= MECH_W * 0.5; warn.push("A teammate already has this aura item"); }
   return { score, why, warn };
@@ -1803,6 +1885,25 @@ function liveSoulsValue(v) {
   return v != null && v !== "" && Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+/* Purchase memory (v2.8.6). bought: { itemId: { sec: game time bought or null, rate: its value a second when bought or null } }. */
+const RECENT_HOLD_S = 180, RECENT_FADE_S = 480;
+function recentFloor(b, sec) {
+  if (!b || !(b.rate > 0) || b.sec == null || sec == null) return 0;
+  const age = Math.max(0, sec - b.sec);
+  return b.rate * (age <= RECENT_HOLD_S ? 1 : Math.max(0, 1 - (age - RECENT_HOLD_S) / (RECENT_FADE_S - RECENT_HOLD_S)));
+}
+/* An item's value a second as a purchase now, as the buy order counts it (rateOf there, before slot and part rules). */
+const purchaseRate = s => { const g = statsValue(s); return Math.max(0.25 * g, g + itemValue(s)) * (s.timing?.factor ?? 1); };
+/* The late game's stage-value columns at a game time: 20-30 min, 30+ min, blended over BLEND_S either side of 30:00. */
+/* Stage-value columns at any game time, blended over BLEND_S either side of 9:00, 20:00 and 30:00 (as the stages are). */
+function flowColsAt(t) {
+  for (const [b, c] of [[540, 0], [1200, 1], [1800, 2]]) if (Math.abs(t - b) < BLEND_S) { const w = (t - (b - BLEND_S)) / (2 * BLEND_S); return [[c, 1 - w], [c + 1, w]]; }
+  return [[flowCol(t), 1]];
+}
+function lateCols(sec) {
+  if (sec != null && Math.abs(sec - 1800) < BLEND_S) { const w = (sec - (1800 - BLEND_S)) / (2 * BLEND_S); return [[2, 1 - w], [3, w]]; }
+  return [[Math.max(2, flowCol(sec ?? 0)), 1]];
+}
 const TAG_CACHE = new Map();
 const tagsOf = it => { let t = TAG_CACHE.get(it.id); if (!t) { t = itemTags(it); TAG_CACHE.set(it.id, t); } return t; };
 
@@ -1813,7 +1914,7 @@ const tagsOf = it => { let t = TAG_CACHE.get(it.id); if (!t) { t = itemTags(it);
    souls, lane (Set of lane opponents), threatW (enemy weights), fed, fl (stage data or null), sec (game time),
    curve (net worth curve), slotCap, skipped (Set), prevOrder (the previous plan), roster (live players, or null),
    me (your hero), heroName (function). */
-function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, lane, threatW, fed, fl, sec, curve, slotCap, skipped, prevOrder, roster, me, heroName, abilities = [] }) {
+function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, lane, threatW, fed, fl, sec, curve, slotCap, skipped, prevOrder, roster, me, heroName, abilities = [], bought = {} }) {
   const wsum = ready.reduce((a, p) => a + p.w, 0);
   // Items already inside something you own (Sprint Boots inside Enduring Speed...) aren't recommended again.
   const covered = coveredBy(owned, prog || { parts: new Map() });
@@ -1828,11 +1929,17 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   // Without the adjusted values (flow data unavailable) popularity is the best remaining evidence, so it counts more.
   const popPrior = fl ? POP_PRIOR : POP_PRIOR * 4;
   for (const s of merged) { s.popShare = (s.pop || 0) / maxPop; s.popPrior = popPrior; s.rarePenalty = rarityPenalty(s.popShare); }
-  const colOf = ph => ph === "lane" ? 0 : ph === "mid" ? 1 : Math.max(2, flowCol(sec));
+  /* Which stage-value columns each stage reads: laning 0-9 min, mid game 9-20, late game 20-30 or 30+ minutes. The two
+     late columns are blended over 90 s either side of 30:00 (v2.8.6), like the stages at 9:00 and 20:00: up to v2.8.5 the
+     value switched in one second, so in a recorded Seven match Infuser fell from +2.2 to -0.5 points at 30:00 and the part
+     bought toward it 19 s earlier was suggested for sale. */
+  const colsOf = ph => ph === "lane" ? [[0, 1]] : ph === "mid" ? [[1, 1]] : lateCols(sec);
   for (const s of merged) {
     const fi = fl?.items.get(s.item.id) || null;
     s.flow = fi;
-    s.adj = fi ? ready.reduce((a, p) => a + (p.w / wsum) * (fi.cols[colOf(p.phase)]?.lift ?? 0), 0) : 0;
+    s.adj = fi ? ready.reduce((a, p) => a + (p.w / wsum) * colsOf(p.phase).reduce((b, [c, w]) => b + w * (fi.cols[c]?.lift ?? 0), 0), 0) : 0;
+    // Its stage value at another game time, for purchases the plan makes later (buildOrder's rateAt).
+    if (fi && sec != null) s.adjAt = t => flowColsAt(t).reduce((b, [c, w]) => b + w * (fi.cols[c]?.lift ?? 0), 0);
     s.timing = timingFor(fi, sec, tagsOf(s.item).has("invest"), fl?.matchLen, { tier: s.item.item_tier, tierShare: fl?.tierShare });
   }
   const ownedItems = [...owned].map(id => itemById[id]).filter(Boolean);
@@ -1849,12 +1956,16 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
       if (h === me) continue;
       (String(p.team) === myTeam ? teamItems : enemyItems).set(h, p.items || []);
     }
-    const P = matchProfile({ enemyItems, teamItems, myItems: owned, itemById, tagsOf, enemyWeight: threatW });
+    const P = matchProfile({ enemyItems, teamItems, myItems: owned, itemById, tagsOf, enemyWeight: threatW, refs: tagRefs(items) });
     if (fl?.lean) { P.myWeapon += fl.lean.weapon * 3000; P.mySpirit += fl.lean.spirit * 3000; }   // your hero's usual lean
     const needs = mechNeeds(P, heroName);
     for (const s of merged) { const m = mechFor(s.item, needs, P, tagsOf); s.mechScore = m.score; s.mechWhy = m.why; s.mechWarn = m.warn; }
     match = { P, needs, fed, enemyItemCount: [...enemyItems.values()].reduce((a, l) => a + l.length, 0) };
   }
+  const scoredById = new Map(merged.map(s => [s.item.id, s]));
+  // Items you've said you don't want are left out of every list and the plan for this match (still shown in details).
+  for (const s of merged) s.skipped = skipped.has(s.item.id);
+  const groups = groupRecs(merged.filter(s => !s.skipped));
   // What each item you own is worth to you now, for deciding what to sell when your slots are full: its stats
   // (less if they don't suit your build), its stage value, and what it answers in this match (healing reduction
   // against healers, for example, judged as if you didn't own it), scaled down when it's an item players stop using
@@ -1866,32 +1977,57 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
      Up to v2.6.1 it was judged like a purchase made now, so items bought earlier looked nearly worthless late and the
      tool kept suggesting sideways swaps. Items that build value over time (Golden Goose Egg) still lose value late. */
   const ownedRates = new Map();
-  const needsNoOwn = match ? mechNeeds({ ...match.P, myHas: new Map() }, heroName) : null;
+  const needsNoOwn = match ? mechNeeds({ ...match.P, myHas: new Map(), myFrac: new Map() }, heroName) : null;
   // What each owned item counters in this team, from the same statistics that would recommend buying it. Without
   // this, an item bought as a counter could be suggested for sale a few minutes later (Spirit Shredder, Graves).
   const ownCtr = new Map(mergeScored(ready.map((p, k) => ({ w: lists[k].w, scored: scoreItems({ baseline: p.entry.baseline,
     perEnemy: p.entry.ready ? p.entry.perEnemy : [], items: ownedItems, owned: new Set(), souls, itemByClass,
     laneIds: lane, phase: p.phase, threat: threatW }) }))).map(x => [x.item.id, x.score || 0]));
+  /* v2.8.6: an item is valued as owned the way it was valued as a purchase, so buying it doesn't make it look weak.
+     - Stage value: the item's value at the stage you bought it (the statistics of players who bought it then, which cover the
+       rest of their match). Up to v2.8.5 it was the average over all stages, so in a recorded Seven match Reactive Barrier was
+       worth twice as much the moment before it was bought (as a purchase at 25:24) as 12 s after, and was suggested for sale.
+       Purchase time unknown (owned when the match was first read): the average, as before.
+     - A recent purchase keeps at least the value it had when you bought it for RECENT_HOLD_S of game time, fading to nothing
+       by RECENT_FADE_S: a sale in that time needs the new item to beat it by the usual margin even so.
+     - A part keeps its share of an upgrade the plan recommends (souls already paid toward it). */
+  const groupIds = new Set(["counters", "build", "situational", "core"].flatMap(k => groups[k].map(x => x.item.id)));
+  const ownedInfo = new Map();
   for (const it of ownedItems) {
     const fi = fl?.items.get(it.id) || null;
+    const b = bought[it.id] || null;
+    const at = b?.sec != null ? fi?.cols?.[flowCol(b.sec)] : null;
     const cols = (fi?.cols || []).filter(Boolean);
     const n = cols.reduce((a, x) => a + x.n, 0);
-    const adj = n ? cols.reduce((a, x) => a + x.lift * x.n, 0) / n : 0;
+    const adj = at ? at.lift : n ? cols.reduce((a, x) => a + x.lift * x.n, 0) / n : 0;
     const invest = tagsOf(it).has("invest") ? timingFor(fi, sec, true, fl?.matchLen).factor : 1;
     const g = statsValue({ item: it });
     const answers = needsNoOwn ? Math.max(0, mechFor(it, needsNoOwn, match.P, tagsOf).score) : 0;
-    ownedRates.set(it.id, Math.max(0.5 * g, g + adj + (ownCtr.get(it.id) || 0) + answers) * invest);
+    let rate = Math.max(0.5 * g, g + adj + (ownCtr.get(it.id) || 0) + answers) * invest;
+    const info = { base: rate };   // its own value, before the protections below (what an upgrade using it up takes away)
+    const floor = recentFloor(b, sec);
+    if (floor > rate) { rate = floor; info.recent = { ago: Math.max(0, Math.round(sec - b.sec)), rate: b.rate }; }
+    else if (floor > 0) info.recent = { ago: Math.max(0, Math.round(sec - b.sec)), rate: b.rate };
+    for (const u of prog?.ups?.get(it.id) || []) {
+      const su = merged.find(x => x.item.id === u);
+      if (!su || owned.has(u) || skipped.has(u) || !groupIds.has(u) || lacksReason(su) || !(su.item.cost > 0)) continue;
+      const share = purchaseRate(su) * (it.cost || 0) / su.item.cost;
+      if (share > rate) { rate = share; info.partOf = u; }
+    }
+    ownedRates.set(it.id, rate);
+    ownedInfo.set(it.id, info);
   }
-  const scoredById = new Map(merged.map(s => [s.item.id, s]));
-  // Items you've said you don't want are left out of every list and the plan for this match (still shown in details).
-  for (const s of merged) s.skipped = skipped.has(s.item.id);
-  const groups = groupRecs(merged.filter(s => !s.skipped));
   // The previous plan without what you've since bought or skipped, so its remaining items line up with the new plan.
   const prevPlan = prevOrder.filter(p => !owned.has(p.id) && !skipped.has(p.id));
   const order = buildOrder(groups, souls, owned, itemByClass, { prev: prevPlan, scoredById, rate: incomeRate(curve, sec), horizon: planHorizon(sec, fl?.matchLen),
-    covered, slotCap, activeCap: MAX_ACTIVE, ownedRates, itemById, exclude: skipped,
+    covered, slotCap, activeCap: MAX_ACTIVE, ownedRates, ownedInfo, itemById, exclude: skipped, sec0: STAGE_AT_PURCHASE.on ? sec : null,
     nwNow: Math.max(souls + spentOn(owned, itemById), netWorthAt(curve, sec) || 0) });
-  return { order, groups, scoredById, merged, match, ownedRates };
+  // What each recommended item is worth a second if bought now, and which upgrade a planned part is for: the page keeps this
+  // for the moment you buy one (purchase memory, v2.8.6).
+  const purchaseValues = new Map();
+  for (const s of merged) purchaseValues.set(s.item.id, { rate: purchaseRate(s) });
+  for (const st of order) { const e = purchaseValues.get(st.s.item.id) || { rate: purchaseRate(st.s) }; if (st.into) { e.forUp = st.into; const su = scoredById.get(st.into); if (su) e.rate = Math.max(e.rate, purchaseRate(su) * (st.s.item.cost || 0) / Math.max(1, su.item.cost || 0)); } purchaseValues.set(st.s.item.id, e); }
+  return { order, groups, scoredById, merged, match, ownedRates, ownedInfo, purchaseValues };
 }
 
 /* ---------- Setup pickers ---------- */
@@ -1999,7 +2135,7 @@ function renderHeroes() {
 function removeOwned(id) {
   if (!S.owned.has(id)) return;
   logEvent("remove", { id });
-  S.owned.delete(id); (S.removedAt ||= {})[id] = Date.now(); if (S.markedAt) delete S.markedAt[id]; if (S.boughtAt) delete S.boughtAt[id];
+  S.owned.delete(id); (S.removedAt ||= {})[id] = Date.now(); if (S.markedAt) delete S.markedAt[id]; if (S.boughtAt) delete S.boughtAt[id]; if (S.boughtInfo) delete S.boughtInfo[id];
   noteSold(id, "you");
   saveMatch(); renderItems(); renderResults(); updateSouls(true); renderBuildSearch();
 }
@@ -2182,6 +2318,8 @@ function rankChoice() {
   const wide = (lo, hi) => [Math.max(0, lo - w), Math.min(116, hi + w)];
   const note = w ? ", widened because there were few games" : "";
   if (v === "all") return { lo: 0, hi: 116, src: "all", label: "all ranks" };
+  // Still too few games after widening three times (a hero released days ago, or rarely played): every rank (v2.8.6).
+  if ((S.rankWiden || 0) > MAX_WIDEN) return { lo: 0, hi: 116, src: "widened", label: "all ranks (too few games at your rank)" };
   const m = /^t(\d+)$/.exec(v);
   if (m) {
     const t = +m[1], [lo, hi] = wide(t * 10 + 1, t * 10 + 6);
@@ -2209,6 +2347,7 @@ function renderRankNote() {
     mine: `Using your own rank, ${rankName(c.centre)}, from your latest ranked match` + (LIVE.id ? (lob ? ` (too few players in this lobby have a known rank: ${lob.n} of ${lob.total})` : " (this lobby's rank isn't known yet)") : " (link a match to use its lobby instead)") + `. Statistics from ${rangeLabel(c.lo, c.hi)}.`,
     none: "No rank known yet, so statistics come from all ranks. Save your Steam account or link a match to narrow them down.",
     all: "Statistics from every rank: the most games, but the least specific to your lobbies." + allRanksHint(),
+    widened: `Statistics from every rank: even widened three times, there were too few games for ${S.me ? heroName(S.me) : "this hero"} near your rank (usually a hero released in the last few days). It narrows again when you change the rank setting or start a new match.`,
     tier: `Statistics from matches where the lobby averaged ${c.label.replace(/ lobbies.*/, "")}${S.rankWiden ? `, widened to ${rangeLabel(c.lo, c.hi)} because there were few games at that rank` : ""}.`
   }[c.src];
   $("rankNote").textContent = t + (S.ranksSource === "fallback" ? " (Rank names couldn't be loaded, so tiers are numbered.)" : "");
@@ -2563,11 +2702,12 @@ function autoSouls() { const b = soulBase(); return b ? Math.max(0, Math.round(b
 async function loadCurve() {
   if (!S.me) return;
   const [minB, maxB] = rankBounds();
-  const key = [S.me, minB, maxB].join("|");
+  const key = [S.me, minB, maxB, timeWindow().from].join("|");
   if (S.curveKey === key && S.curve) return;
   S.curveKey = key; S.curve = null;
   try {
-    const q = new URLSearchParams({ resolution: 0, hero_ids: S.me, min_average_badge: minB, max_average_badge: maxB });
+    // The same period as the statistics (v2.8.6; the data service's default is also the last 30 days).
+    const q = new URLSearchParams({ resolution: 0, hero_ids: S.me, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: timeWindow().from });
     const pts = await getJSON(`/v1/analytics/player-performance-curve?${q}`);
     if (S.curveKey !== key) return;
     S.curve = pts.map(p => ({ t: p.game_time, nw: p.net_worth_avg })).filter(p => p.nw != null).sort((a, b) => a.t - b.t);
@@ -3103,7 +3243,7 @@ function spectatesUsed() { return spectateLog().length; }
 function resetMatchState() {
   logClose("another match");
   S.enemies = []; S.lane = new Set(); S.owned = new Set(); S.clockStart = null; S.clockStartedOnce = false; S.soulOffset = 0;
-  S.clockAdjust = 0; S.lastSouls = null; S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.flexManual = 0; S.skipped = {}; S.deaths = [];
+  S.clockAdjust = 0; S.lastSouls = null; S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = [];
   S.soulsRef = null; S.selected = null; S.tab = null; S.pending = []; S.windowFrom = null; S.handEnemies = false;
   $("souls").value = 0; setPhase("lane");
   S.view = null;
@@ -4333,7 +4473,7 @@ function renderResultsInner() {
   // Too few games in this skill bracket: widen it a tier each side (shown in the setup note and the details).
   const most = Math.max(0, ...ready.flatMap(p => p.entry.baseline.map(r => r.matches)));
   const rc = rankChoice();
-  if (most < MIN_BRACKET_GAMES && (S.rankWiden || 0) < MAX_WIDEN && !(rc.lo <= 0 && rc.hi >= 116)) {
+  if (most < MIN_BRACKET_GAMES && (S.rankWiden || 0) <= MAX_WIDEN && !(rc.lo <= 0 && rc.hi >= 116)) {
     S.rankWiden = (S.rankWiden || 0) + 1; renderRankNote(); loadCurve(); S.matchupKey = null; loadThreats();
     if (S.view) $("orderNote").textContent = "Few games at this rank: widening…";
     setTimeout(renderResults, 0); return;
@@ -4347,9 +4487,21 @@ function renderResultsInner() {
   const fl = S.flow?.ready ? S.flow : null;
   const slotsNow = slotInfo();
   const skipped = skippedNow();
-  const { order, groups, scoredById, match, ownedRates } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
+  /* Purchase memory (v2.8.6): an item that's new since the last calculation keeps the value it had as a recommendation (and
+     the upgrade it was bought toward), so the next calculation doesn't treat a purchase made a second ago as dead weight. */
+  S.boughtInfo ||= {};
+  if (S.lastOwned) for (const id of S.owned) if (!S.lastOwned.has(id) && !S.boughtInfo[id]) {
+    const known = S.boughtAt && id in S.boughtAt, t = known ? S.boughtAt[id] : Math.round(sec);
+    const pv = S.lastPV?.get(id);
+    S.boughtInfo[id] = { sec: t ?? null, rate: t == null ? null : pv?.rate ?? null, forUp: pv?.forUp ?? null };
+  }
+  for (const id of Object.keys(S.boughtInfo)) if (!S.owned.has(Number(id))) delete S.boughtInfo[id];
+  const bought = {};
+  for (const id of S.owned) bought[id] = S.boughtInfo[id] || { sec: S.boughtAt?.[id] ?? null, rate: null };
+  const { order, groups, scoredById, match, ownedRates, ownedInfo, purchaseValues } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
     prog: S.prog, owned: S.owned, souls, lane: S.lane, threatW, fed, fl, sec, curve: S.curve, slotCap: slotsNow.cap, skipped, prevOrder: S.prevOrder,
-    roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me) });
+    roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me), bought });
+  if (!prelim) { S.lastPV = purchaseValues; S.lastOwned = new Set(S.owned); }
 
   // Possible unmarked purchases (see checkSoulsDrop); drop the ones that are owned or were just sold.
   const now = Date.now();
@@ -4367,7 +4519,7 @@ function renderResultsInner() {
     + `items bought during ${ready.map(p => PHASE_NAMES[p.phase].toLowerCase()).join(" and ")}${ready.length > 1 ? " (blended)" : ""}. `
     + (fl ? "Item values are adjusted for how far ahead buyers were. " : "")
     + `Biggest single sample: ${biggest.toLocaleString()} games. Fetched ${e0.fetchedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}.`;
-  S.view = { souls, order, groups, scoredById, label, threat, match, empty: !e0.baseline.length, slots: slotsNow, at: Date.now(), prelim, ownedRates };
+  S.view = { souls, order, groups, scoredById, label, threat, match, empty: !e0.baseline.length, slots: slotsNow, at: Date.now(), prelim, ownedRates, ownedInfo, thin: e0.baseline.length > 0 && most < MIN_BRACKET_GAMES ? most : null };
   renderBoard();
   scheduleFit();
   logSnapshot(S.view, ready);
@@ -4445,8 +4597,11 @@ function renderBoard() {
   order.forEach((st, i) => ol.append(i === 0 ? nextCard(st, souls) : rowEl(st, souls, i + 1)));
   renderEgg(); renderSkipped(); renderDead();
   $("orderNote").textContent = order.length > 1 ? `Then ${order.length - 1} more to work toward` : "";
-  const pre = $("orderPrelim"); pre.hidden = !S.view.prelim;
-  pre.className = "small prelim"; pre.textContent = S.view.prelim ? "Preliminary: enemy counters still loading" : "";
+  const pre = $("orderPrelim"); pre.hidden = !S.view.prelim && !S.view.thin;
+  pre.className = "small prelim";
+  // Few games even at every rank (v2.8.6): usually a hero released in the last day or two. Said plainly, not hidden.
+  pre.textContent = S.view.prelim ? "Preliminary: enemy counters still loading"
+    : S.view.thin ? `Few games so far for ${heroName(S.me)} (at most ${S.view.thin.toLocaleString()} for any item${heroNewNote(S.me) ? ": a new hero" : ""}), so treat these suggestions as rough. They firm up as games come in.` : "";
   renderOrderAge();
 
   // Catch-up strip
@@ -4829,7 +4984,7 @@ async function init() {
       S.windowFrom = m.windowFrom ?? null;
       S.prevOrder = (m.prevOrder || []).filter(p => S.itemById[p.id]);
       S.sold = (m.sold || []).filter(x => S.itemById[x.id] && !S.owned.has(x.id));
-      S.markedAt = m.markedAt || {}; S.removedAt = m.removedAt || {}; S.boughtAt = m.boughtAt || {}; S.deaths = Array.isArray(m.deaths) ? m.deaths.filter(d => d && Number.isFinite(d.at)).slice(-60) : []; S.flexManual = Math.min(FLEX_SLOTS_MAX, Math.max(0, Number(m.flexManual) || 0)); S.skipped = m.skipped && typeof m.skipped === "object" ? m.skipped : {};
+      S.markedAt = m.markedAt || {}; S.removedAt = m.removedAt || {}; S.boughtAt = m.boughtAt || {}; S.boughtInfo = m.boughtInfo && typeof m.boughtInfo === "object" ? m.boughtInfo : {}; S.deaths = Array.isArray(m.deaths) ? m.deaths.filter(d => d && Number.isFinite(d.at)).slice(-60) : []; S.flexManual = Math.min(FLEX_SLOTS_MAX, Math.max(0, Number(m.flexManual) || 0)); S.skipped = m.skipped && typeof m.skipped === "object" ? m.skipped : {};
       resume = !!(m.active && S.me && S.enemies.length);
       if (m.matchId) { $("matchId").value = m.matchId; S.resumeLink = true; }
       S.lastMatchId = m.lastMatchId || m.matchId || null; S.clockAdjust = m.clockAdjust || 0;
@@ -4998,7 +5153,7 @@ $("clearAll").onclick = () => {
   S.me = null; store.set("me", null);
   S.enemies = []; S.lane = new Set(); S.owned = new Set(); S.clockStart = null; S.clockStartedOnce = false; S.soulOffset = 0; S.lastSouls = null;
   $("buildSearch").value = ""; renderBuildSearch();
-  S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.flexManual = 0; S.skipped = {}; S.deaths = []; S.soulsRef = null; S.selected = null; S.tab = null; S.view = null; S.cache = {}; S.pending = []; S.windowFrom = null;
+  S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = []; S.soulsRef = null; S.selected = null; S.tab = null; S.view = null; S.cache = {}; S.pending = []; S.windowFrom = null;
   unlinkMatch(true); cancelLinkRetry(); $("matchId").value = ""; liveDiag(""); liveStatus("Cleared for a new match. Press Find my match once you're in the game, or set things up by hand.");
   $("souls").value = 0; setPhase("lane");
   // Your rank and period choices stay (v2.7.4): they're picked before finding a match, not per match.
