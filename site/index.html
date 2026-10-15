@@ -53,7 +53,10 @@
   .notes h3 { font-size: 14px; margin: 10px 0 4px; } .notes ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
   .notes .when { color: var(--muted); font-weight: 400; font-size: 12.5px; }
   .fb select { width: 100%; max-width: 100%; }
-  .sheet.fb, .sheet.notes { box-sizing: border-box; max-width: 100%; overflow-y: auto; }
+  .sheet.fb, .sheet.notes, .sheet.review { box-sizing: border-box; max-width: 100%; overflow-y: auto; }
+  .review h3 { font-size: 14px; margin: 10px 0 4px; } .review-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+  .review-table { width: 100%; border-collapse: collapse; font-size: 13px; } .review-table th, .review-table td { text-align: left; padding: 3px 6px; border-bottom: 1px dotted var(--line); vertical-align: top; }
+  .review-table th { color: var(--muted); font-weight: 600; } .review-table tr.differs td:last-child { color: var(--warn); }
   .fb textarea { width: 100%; min-height: 110px; font: 14px var(--body); padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); box-sizing: border-box; }
   #logSetup > details > summary { cursor: pointer; font-weight: 600; }
   .updnote .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--muted); }
@@ -294,8 +297,9 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.8.7</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.9</span>
     <span class="small updnote" id="updNote" hidden></span>
+    <button id="reviewOpen" class="linkbtn small" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
   </div>
@@ -466,6 +470,15 @@
     <div id="notesBody" class="scroll"></div>
   </div>
 </div>
+<div id="reviewOverlay" class="overlay" hidden>
+  <div class="sheet review" role="dialog" aria-labelledby="reviewTitle">
+    <div class="mod-head"><h2 id="reviewTitle">Match review</h2><button id="reviewClose" class="btn" type="button">Close</button></div>
+    <p class="small muted">Your purchases in a finished match next to what the tool suggested at each moment, and anything worth a look: souls left unspent, sales at a loss, items bought late. Works from about an hour after a match ends.</p>
+    <div class="rowflex"><label for="reviewMatch" class="small">Match ID</label><input id="reviewMatch" type="search" inputmode="numeric" autocomplete="off" placeholder="For example 117143518"><button id="reviewGo" class="btn main" type="button">Review</button></div>
+    <p id="reviewStatus" class="small muted" role="status"></p>
+    <div id="reviewBody" class="scroll"></div>
+  </div>
+</div>
 <div id="feedbackOverlay" class="overlay" hidden>
   <div class="sheet fb" role="dialog" aria-labelledby="fbTitle">
     <div class="mod-head"><h2 id="fbTitle">Send feedback</h2><button id="fbClose" class="btn" type="button">Close</button></div>
@@ -508,10 +521,14 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.8.7";   // shown in the top bar and written into match records
+const VERSION = "v2.9";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.9", date: "October 15, 2026", items: [
+    "New: Review a match (top bar, and offered when a linked match ends). Your purchases next to what the tool suggested at that moment, plus anything worth a look: souls left unspent while alive, sales at a loss, items bought late, an Egg never hatched.",
+    "Recommendations retuned from about 7,000 real matches: the statistics for each stage of the match were trusted more than they deserved (especially late in the match), and what the live match needs counted too much. After the change, players who bought the tool's suggestions won more often than their team's lead predicted, in 13 of 14 hero and rank samples.",
+    "An item you bought in the last 3 minutes is only suggested for sale for something clearly better per soul, not just bigger."] },
   { v: "v2.8.7", date: "October 14, 2026", items: [
     "The buy order shows four steps even when your slots are full. Steps after the first two say \"if your slots are still full\" when they need a sale.",
     "Marking a step bought when it sells something first now marks the sale too (half its price back), and Undo reverses both. Before, the sold item stayed in your list until the live match caught up."] },
@@ -615,6 +632,19 @@ const PAIR_FIT = { on: false, w: 0.5 };
    11% more often, while the purchase memory alone already removed almost all "sell what you just bought" moments (45 -> 5).
    Too big a change before v2.9's backtest can judge it. Replays and tests can switch it on. */
 const STAGE_AT_PURCHASE = { on: false };
+/* Calibration weights from the v2.9 backtest (roadmap, v2.9): how much each part of an item's value really predicts winning.
+   Measured on 6,979 players in 7,000 real matches (8 heroes, two rank brackets, October 8 to 15) with statistics from the 30
+   days before them, so no match was judged by numbers that included its own result: the chance of winning after buying an
+   item, beyond what the team's net worth lead at that moment already predicts, regressed on each part of its value.
+   - Stage value: predicts winning, but its numbers were too big: 0.67 of them in the laning stage, 0.40 to 0.47 mid game,
+     0.22 late (as measured). Weighted by that, it predicts at face value (slope 1.0 at every stage).
+   - Build fit: predicted nothing (0.07, between -0.24 and 0.38), so it counts a tenth.
+   - What the live match needs (MECH_W below): 0.37 (between -0.05 and 0.81), so a full answer counts 1.2 points, not 3.
+   - Counters against the enemy heroes (0.8) and popularity (0.75) are consistent with face value: unchanged.
+   Result: the item a winner bought next was in the top 4 more often (23.1% to 25.1%), and buying the tool's top 4 went
+   with winning more often than the situation predicted in 13 of 14 samples (10 before). */
+const ADJ_W = [0.65, 0.45, 0.2, 0.2];   // stage value, per stage column (0-9, 9-20, 20-30, 30+ min)
+const FIT_W = 0.1;                      // build fit
 const POP_PRIOR = 0.002;     // popularity at this stage: weak evidence (at most +0.2 pts), breaks near-ties
 const RARE_STAGE_SHARE = 0.25;   // bought at this stage by under a quarter of the usual share -> "rarely bought this late"
 /* Items your hero rarely buys need stronger evidence. Few buyers means noisier numbers, the players who pick an
@@ -1233,7 +1263,7 @@ const pts = x => (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(1);
 /* One value for every item, in win-rate points: its stage value (net-worth adjusted), how it does
    against this enemy team, how it fits your items, and what the live match needs. */
 function itemValue(s) {
-  let adj = s.adj || 0, ctr = s.score || 0, fit = s.fitScore || 0;   // signed and shrunk by their uncertainty
+  let adj = s.adj || 0, ctr = s.score || 0, fit = FIT_W * (s.fitScore || 0);   // signed and shrunk by their uncertainty (adj is weighted where it's set)
   // A healing amplifier with nothing to amplify (see ampSupport): its buyers' good results don't apply to you.
   if (s.amp?.none) { if (adj > 0) adj = 0; if (ctr > 0) ctr = 0; if (fit > 0) fit = 0; }
   // Does the same job as an item you own (see overlapOf): only part of its favourable numbers apply to you.
@@ -1415,10 +1445,17 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
         // stats, so it needs a much bigger gain: the item sold has to be clearly doing little for you. So does selling
         // something you bought in the last RECENT_HOLD_S (v2.8.6): changing your mind that quickly needs a clear reason.
         const needFor = ([id, h]) => (it.cost || 0) >= 2 * (h.item?.cost || 0) && !(h.seq < 0 && (ownedInfo.get(id)?.recent?.ago ?? Infinity) <= RECENT_HOLD_S) ? SELL_GAIN : SELL_SIDEWAYS_GAIN;
-        const pick = i <= 1 || late ? [...hold].filter(([id, h]) => !used.includes(id) && (i <= 1 || h.seq < 0) && (!activeNeed || h.item?.is_active_item) && (h.item?.cost || 0) <= (it.cost || 0))
+        // A later step (v2.8.7) only sells what you owned before, and never something bought in the last RECENT_HOLD_S (v2.9):
+        // it's a tentative step, not a clear reason to undo a purchase.
+        const pick = i <= 1 || late ? [...hold].filter(([id, h]) => !used.includes(id) && (i <= 1 || (h.seq < 0 && !((ownedInfo.get(id)?.recent?.ago ?? Infinity) <= RECENT_HOLD_S))) && (!activeNeed || h.item?.is_active_item) && (h.item?.cost || 0) <= (it.cost || 0))
           .sort((a, b) => a[1].rate * needFor(a) - b[1].rate * needFor(b))[0] : null;
         const need = pick ? needFor(pick) : SELL_GAIN;
-        if (!pick || pick[1].rate * need > newRate || newRate - pick[1].rate < SELL_MIN_GAIN) { blocked.add(i); T.push(Infinity); costs.push(0); return; }
+        /* A purchase from the last RECENT_HOLD_S is only sold for something clearly better per soul, not just bigger (v2.9): with
+           the calibrated values (closer to each item's plain stats), a 1,600 item is worth about twice an 800 one by size
+           alone, so "twice the value" let the tool sell an item 70 s after recommending it (McGinnis, October 13 record). */
+        const recentPick = pick && pick[1].seq < 0 && (ownedInfo.get(pick[0])?.recent?.ago ?? Infinity) <= RECENT_HOLD_S;
+        const perSoulOk = !recentPick || newRate / Math.max(1, it.cost || 0) >= SELL_SIDEWAYS_GAIN * pick[1].rate / Math.max(1, pick[1].item?.cost || 0);
+        if (!pick || !perSoulOk || pick[1].rate * need > newRate || newRate - pick[1].rate < SELL_MIN_GAIN) { blocked.add(i); T.push(Infinity); costs.push(0); return; }
         const [sid, sh] = pick;
         refund = Math.round((sh.item?.cost || 0) * SELL_REFUND);
         sells[i] = { id: sid, item: sh.item, refund, seq: sh.seq, rate: sh.rate };
@@ -1750,7 +1787,7 @@ function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyW
   return P;
 }
 
-const MECH_W = 0.03;   // a full-strength answer counts like a +3 point win-rate edge
+const MECH_W = 0.012;   // a full-strength answer counts like a +1.2 point win-rate edge (v2.9 backtest; 3 points up to v2.8.7)
 /* How much of an answer an item is (v2.8.6). Up to v2.8.5 any item with the effect counted in full: Echo Shard's 5% spirit
    resist answered "enemies build spirit damage" as strongly as Spirit Resilience's 30%, Healbane's 35% healing reduction as
    strongly as Spirit Burn's 70%. Now an answer counts in proportion to its number, against the strongest always-on item in the
@@ -1967,9 +2004,9 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   for (const s of merged) {
     const fi = fl?.items.get(s.item.id) || null;
     s.flow = fi;
-    s.adj = fi ? ready.reduce((a, p) => a + (p.w / wsum) * colsOf(p.phase).reduce((b, [c, w]) => b + w * (fi.cols[c]?.lift ?? 0), 0), 0) : 0;
+    s.adj = fi ? ready.reduce((a, p) => a + (p.w / wsum) * colsOf(p.phase).reduce((b, [c, w]) => b + w * ADJ_W[c] * (fi.cols[c]?.lift ?? 0), 0), 0) : 0;
     // Its stage value at another game time, for purchases the plan makes later (buildOrder's rateAt).
-    if (fi && sec != null) s.adjAt = t => flowColsAt(t).reduce((b, [c, w]) => b + w * (fi.cols[c]?.lift ?? 0), 0);
+    if (fi && sec != null) s.adjAt = t => flowColsAt(t).reduce((b, [c, w]) => b + w * ADJ_W[c] * (fi.cols[c]?.lift ?? 0), 0);
     s.timing = timingFor(fi, sec, tagsOf(s.item).has("invest"), fl?.matchLen, { tier: s.item.item_tier, tierShare: fl?.tierShare });
   }
   const ownedItems = [...owned].map(id => itemById[id]).filter(Boolean);
@@ -2029,7 +2066,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     const at = b?.sec != null ? fi?.cols?.[flowCol(b.sec)] : null;
     const cols = (fi?.cols || []).filter(Boolean);
     const n = cols.reduce((a, x) => a + x.n, 0);
-    const adj = at ? at.lift : n ? cols.reduce((a, x) => a + x.lift * x.n, 0) / n : 0;
+    const adj = at ? ADJ_W[flowCol(b.sec)] * at.lift : n ? (fi.cols || []).reduce((a, x, c) => a + (x ? ADJ_W[c] * x.lift * x.n : 0), 0) / n : 0;
     const invest = tagsOf(it).has("invest") ? timingFor(fi, sec, true, fl?.matchLen).factor : 1;
     const g = statsValue({ item: it });
     const answers = needsNoOwn ? Math.max(0, mechFor(it, needsNoOwn, match.P, tagsOf).score) : 0;
@@ -2058,6 +2095,147 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   for (const s of merged) purchaseValues.set(s.item.id, { rate: purchaseRate(s) });
   for (const st of order) { const e = purchaseValues.get(st.s.item.id) || { rate: purchaseRate(st.s) }; if (st.into) { e.forUp = st.into; const su = scoredById.get(st.into); if (su) e.rate = Math.max(e.rate, purchaseRate(su) * (st.s.item.cost || 0) / Math.max(1, su.item.cost || 0)); } purchaseValues.set(st.s.item.id, e); }
   return { order, groups, scoredById, merged, match, ownedRates, ownedInfo, purchaseValues };
+}
+
+/* ---------- Replaying a finished match (v2.9) ----------
+   The same engine, run at moments of a match that has ended: for the post-match review (your own match, from the data
+   service's match details) and the backtest (tests/backtest.js, on real matches fetched by the Backtest data workflow).
+   A player here: { team, hero, lane, items: [[game time bought, item id, game time sold or used up (0 = kept), ...]],
+   t: [sample times], nwT: [net worth at those times], deaths: [[game time, seconds dead]] }. */
+/* Normalise the data service's match details (/v1/matches/{id}/metadata) into players as above, plus each player's account
+   (kept only in memory, to find you; never stored). */
+function matchFromMetadata(meta) {
+  const info = meta?.match_info || meta || {};
+  const team = x => typeof x === "string" ? (/1$/.test(x) ? 1 : 0) : Number(x);
+  const players = (info.players || []).map(p => {
+    const stats = Array.isArray(p.stats) ? p.stats : [];
+    return { account: p.account_id ?? null, slot: p.player_slot ?? null, team: team(p.team), hero: Number(p.hero_id), lane: p.assigned_lane ?? null,
+      items: (p.items || []).map(x => [x.game_time_s ?? 0, x.item_id, x.sold_time_s || 0, x.upgrade_id || 0, x.flags || 0]),
+      t: stats.map(x => x.time_stamp_s ?? 0), nwT: stats.map(x => x.net_worth ?? 0),
+      deaths: (p.death_details || []).map(d => [d.game_time_s ?? 0, d.death_duration_s ?? 0]), nw: p.net_worth ?? null };
+  });
+  return { id: info.match_id ?? null, dur: info.duration_s ?? null, win: info.winning_team != null ? team(info.winning_team) : null, players };
+}
+/* Shop items held at game time t: bought by t, and not sold or used up in an upgrade by t. Map id -> time bought. */
+function heldAt(p, t, itemById, itemByClass) {
+  const held = new Map();
+  for (const [bt, id, gone] of (p.items || []).slice().sort((a, b) => a[0] - b[0])) {
+    if (bt > t || !itemById[id]) continue;
+    if (gone && gone <= t) { held.delete(id); continue; }
+    for (const cls of itemById[id].component_items || []) { const c = itemByClass[cls]; if (c) held.delete(c.id); }
+    held.set(id, bt);
+  }
+  return held;
+}
+/* Net worth at game time t, read off the player's samples by straight-line steps. */
+function nwAt(p, t) {
+  const T = p.t || [], N = p.nwT || [];
+  if (!T.length) return null;
+  if (t <= T[0]) return N[0] * (T[0] ? t / T[0] : 1);
+  for (let i = 1; i < T.length; i++) if (t <= T[i]) return N[i - 1] + (N[i] - N[i - 1]) * (t - T[i - 1]) / Math.max(1, T[i] - T[i - 1]);
+  return N[N.length - 1];
+}
+const aliveAt = (p, t) => !(p.deaths || []).some(([d, len]) => t >= d && t < d + (len || 0));
+/* Run the engine for one player at the given game times, in order, carrying the plan and purchase memory from one moment to
+   the next as the page does. st: the statistics, as the page holds them: { stages: { lane|mid|late: { baseline, perEnemy:
+   { enemy: rows }, fit: { anchor: rows } } }, laneVs: { enemy: rows }, fl (flowLifts result with matchLen and lean),
+   curve, matchups: hero-counter rows }. G: { items, itemById, itemByClass, prog }. onMoment(info) gets each moment. */
+function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abilities = [], slotCap = null, onMoment }) {
+  const hero = p.hero;
+  const enemies = match.players.filter(x => x.team !== p.team).map(x => x.hero);
+  const laneIds = new Set(match.players.filter(x => x.team !== p.team && p.lane && x.lane === p.lane).map(x => x.hero));
+  let prevOrder = [], lastPV = null, lastOwned = null, maxHeld = 0;
+  const boughtInfo = {};
+  for (const t of times) {
+    const held = heldAt(p, t, G.itemById, G.itemByClass), owned = new Set(held.keys());
+    maxHeld = Math.max(maxHeld, owned.size);
+    const nw = nwAt(p, t);
+    let spent = 0; for (const id of owned) spent += G.itemById[id]?.cost || 0;
+    const souls = Math.max(0, Math.round(((nw ?? 0) - spent) / 10) * 10);
+    const roster = new Map(match.players.map(x => [x.hero, { team: x.team, items: [...heldAt(x, t, G.itemById, G.itemByClass).keys()], nw: nwAt(x, t) ?? 0 }]));
+    const anchors = [...owned].map(id => G.itemById[id]).filter(Boolean).sort((a, b) => b.cost - a.cost).slice(0, 3).map(i => i.id);
+    const ready = phasePlan(t, phaseForSeconds(t)).map(pp => {
+      const s = st.stages[pp.phase] || { baseline: [], perEnemy: {}, fit: {} };
+      const perAnchor = anchors.filter(a => s.fit?.[a]).map(a => ({ anchorId: a, rows: s.fit[a] }));
+      return { ...pp, entry: { ready: true, baseline: s.baseline, perEnemy: enemies.filter(e => s.perEnemy?.[e]).map(e => ({ enemyId: e, rows: s.perEnemy[e] })),
+        fitMap: perAnchor.length ? buildFit(s.baseline, perAnchor) : {} },
+        laneRows: pp.phase === "lane" ? new Map([...laneIds].filter(e => st.laneVs?.[e]).map(e => [e, st.laneVs[e]])) : null };
+    });
+    const threat = threatWeights(st.matchups || [], hero, enemies), fed = fedWeights(roster, enemies);
+    const threatW = new Map(enemies.map(e => [e, (threat.get(e)?.weight || 1) * (fed.get(e)?.weight || 1)]));
+    for (const id of owned) if (lastOwned && !lastOwned.has(id) && !boughtInfo[id]) { const pv = lastPV?.get(id); boughtInfo[id] = { sec: held.get(id), rate: pv?.rate ?? null, forUp: pv?.forUp ?? null }; }
+    for (const id of Object.keys(boughtInfo)) if (!owned.has(Number(id))) delete boughtInfo[id];
+    const bought = {}; for (const id of owned) bought[id] = boughtInfo[id] || { sec: held.get(id), rate: null };
+    const cap = slotCap ?? Math.max(BASE_SLOTS, maxHeld);
+    const res = computePlan({ ready, items: G.items, itemById: G.itemById, itemByClass: G.itemByClass, prog: G.prog, owned, souls, lane: laneIds, threatW, fed,
+      fl: st.fl || null, sec: t, curve: st.curve || [], slotCap: cap, skipped: new Set(), prevOrder, roster, me: hero, heroName, abilities, bought });
+    lastPV = res.purchaseValues; lastOwned = owned;
+    prevOrder = res.order.map(x => ({ id: x.s.item.id, kind: x.kind, cost: x.s.cost }));
+    onMoment({ t, owned, held, souls, nw, cap, alive: aliveAt(p, t), res });
+  }
+}
+
+/* The post-match review (v2.9): what happened with your purchases, from the moments replayPlayer ran the engine at.
+   moments: [{ t, owned (Set), souls, alive, cap, order: [{ id, cost, sell }], timing: { itemId: timing note } }], in time
+   order, including one just before each purchase (t = time bought - 1). Returns { purchases, findings, agree, total }.
+   Plain observations with the reason; it never says a purchase lost the game. */
+const FLOAT_MIN_S = 120, FLOAT_SOULS = 1500, QUICK_SELL_S = 180;
+function reviewFindings({ p, moments, itemById, itemByClass, prog, dur = null }) {
+  const fmt = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+  const name = id => itemById[id]?.name || "an item";
+  const byT = new Map(moments.map(m => [m.t, m]));
+  const buys = (p.items || []).filter(([, id]) => itemById[id]).map(([bt, id, gone]) => ({ t: bt, id, gone })).sort((a, b) => a.t - b.t);
+  const partsOf = id => (itemById[id]?.component_items || []).map(c => itemByClass[c]?.id).filter(Boolean);
+  // An item gone at the moment something that uses it was bought was upgraded, not sold.
+  const usedUp = b => b.gone && buys.some(x => x.t === b.gone && partsOf(x.id).includes(b.id));
+  const purchases = [];
+  let agree = 0, total = 0;
+  for (const b of buys) {
+    const m = byT.get(Math.max(1, b.t - 1));
+    if (!m || m.owned.has(b.id)) continue;
+    const pos = m.order.findIndex(x => x.id === b.id || partsOf(x.id).includes(b.id));
+    const first = m.order[0] || null;
+    total++; if (pos >= 0 && pos < 4) agree++;
+    purchases.push({ t: b.t, id: b.id, pos: pos >= 0 ? pos + 1 : null, partOf: pos >= 0 && m.order[pos].id !== b.id ? m.order[pos].id : null, first: first ? first.id : null, late: m.timing?.[b.id] || null });
+  }
+  const findings = [];
+  // Souls held while alive when the next suggested item was affordable.
+  let run = null;
+  const flush = () => { if (run && run.to - run.from >= FLOAT_MIN_S) findings.push({ kind: "float", t: run.from, text: `From ${fmt(run.from)} to ${fmt(run.to)} you held ${run.max.toLocaleString()} souls or more while alive. The tool's next buy then (${name(run.item)}, ${(itemById[run.item]?.cost || 0).toLocaleString()}) was affordable: souls only start helping once they're spent.` }); run = null; };
+  for (const m of moments) {
+    const nb = m.order[0];
+    const can = m.alive && nb && m.souls >= Math.max(FLOAT_SOULS, nb.cost) && !nb.sell;
+    if (can) { if (!run) run = { from: m.t, to: m.t, max: m.souls, item: nb.id }; else { run.to = m.t; run.max = Math.max(run.max, m.souls); } }
+    else flush();
+  }
+  flush();
+  // Purchases the statistics say are rarely made this late.
+  for (const x of purchases) if (x.late) findings.push({ kind: "late", t: x.t, text: `${fmt(x.t)} ${name(x.id)}: ${x.late}` });
+  // Sales: half the price lost; soon after buying; parts sold without their upgrade.
+  for (const b of buys) {
+    if (!b.gone || usedUp(b) || (dur && b.gone >= dur - 5)) continue;
+    const it = itemById[b.id], lost = Math.round((it.cost || 0) / 2), held = b.gone - b.t;
+    const isPart = (prog?.ups?.get(b.id)?.size || 0) > 0;
+    let text = `${fmt(b.gone)} sold ${it.name} after ${held < 120 ? held + " s" : Math.round(held / 60) + " min"}: about ${lost.toLocaleString()} souls lost (an item sells for half its price).`;
+    if (held < QUICK_SELL_S) text += " Selling this soon after buying usually means the purchase wasn't needed.";
+    else if (isPart) text += " It builds into a bigger item; upgrading it would have kept its price.";
+    findings.push({ kind: "sale", t: b.gone, text, lost });
+  }
+  // Golden Goose Egg and other items that store souls.
+  for (const b of buys) {
+    const st = soulStore(itemById[b.id]);
+    if (!st) continue;
+    if (!b.gone) findings.push({ kind: "egg", t: b.t, text: `${name(b.id)} (bought at ${fmt(b.t)}) was never hatched: its stored souls and buffs only count once it's used.` });
+    else if (b.gone < EGG_TIERS_S[0] && b.gone - b.t < 600) findings.push({ kind: "egg", t: b.gone, text: `${name(b.id)} was hatched at ${fmt(b.gone)}, before 10:00: its permanent buffs are stronger after 10:00.` });
+  }
+  // Cheap items still taking full slots late in the match.
+  const last = moments[moments.length - 1];
+  if (last && last.t >= 1500 && last.owned.size >= last.cap) {
+    const cheap = [...last.owned].filter(id => (itemById[id]?.cost || 0) <= 800);
+    if (cheap.length >= 2) findings.push({ kind: "slots", t: last.t, text: `At ${fmt(last.t)} your slots were full and ${cheap.length} of them held 800-soul items (${cheap.map(name).join(", ")}). Late in a match a slot is worth more than that: selling one for a bigger item usually pays.` });
+  }
+  findings.sort((a, b) => a.t - b.t);
+  return { purchases, findings, agree, total };
 }
 
 /* ---------- Setup pickers ---------- */
@@ -3423,6 +3601,8 @@ function matchEnded(how) {
   liveStatus(how === "confirmed" ? "The match has ended. Live link finished." + rec + watch
     : "The live broadcast stopped and didn't come back, so the match has probably ended. Still playing? Press Connect to reconnect (free for the same match); anything you mark by hand is kept." + rec + watch, "muted");
   renderLive(); renderSources();
+  // The post-match review (v2.9). The match details usually arrive within the hour; the review says so if they haven't yet.
+  showToast("The match has ended. Review your purchases?", { more: () => openReview(String(S.endedMatchId)), moreLabel: "Review" });
 }
 function startGameOverStream() {
   const c = LIVE.cols;
@@ -4161,6 +4341,120 @@ const heroName = id => S.heroById[id]?.name || "an enemy";
 const listNames = ids => { const n = ids.map(heroName); return n.length > 1 ? n.slice(0, -1).join(", ") + " and " + n[n.length - 1] : n.join(""); };
 const itemName = id => S.itemById[id]?.name || "your item";
 
+/* ---------- Post-match review (v2.9) ----------
+   After a match (yours, by its match ID), the data service's match details give every purchase and sale with its time,
+   net worth over time and deaths. The engine runs at each of your purchases and every minute with the statistics it would
+   have used (your rank setting and period now), and reviewFindings turns that into plain observations. Other players'
+   accounts are only used to find you, and nothing about them is kept. */
+const REVIEW = { busy: false, last: null };
+function openReview(matchId) {
+  $("reviewMatch").value = matchId ?? (REVIEW.last?.id || S.endedMatchId || S.lastMatchId || "");
+  $("reviewOverlay").hidden = false;
+  if (matchId) runReview(); else $("reviewMatch").focus();
+}
+function reviewStatus(text, cls = "muted") { $("reviewStatus").textContent = text; $("reviewStatus").className = "small " + cls; }
+/* The statistics for one hero against given enemies, as the page asks for them during a match (ensurePhase, laneRowsNow,
+   loadThreats, ensureFlow, refreshFit), for the review. */
+async function reviewStats(hero, enemies, laneIds, anchors) {
+  const [minB, maxB] = rankBounds(), from = timeWindow().from;
+  const base = { hero_ids: hero, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from, min_matches: 1, corrupted_items: "exclude" };
+  const jobs = [];
+  const q = o => `/v1/analytics/item-stats?${new URLSearchParams(o)}`;
+  const stages = {};
+  for (const [phase, [fromS, toS]] of Object.entries(PHASES)) {
+    const pq = { ...base, min_bought_at_s: fromS }; if (toS) pq.max_bought_at_s = toS;
+    const s = stages[phase] = { baseline: [], perEnemy: {}, fit: {} };
+    jobs.push(() => getJSON(q(pq)).then(r => { s.baseline = r; }));
+    for (const e of enemies) jobs.push(() => getJSON(q({ ...pq, enemy_hero_ids: e })).then(r => { s.perEnemy[e] = r; }));
+    for (const a of anchors) jobs.push(() => getJSON(q({ ...pq, include_item_ids: a })).then(r => { s.fit[a] = r; }).catch(() => {}));
+  }
+  const laneVs = {};
+  for (const e of laneIds) jobs.push(() => getJSON(q({ ...base, min_bought_at_s: 0, max_bought_at_s: 540, enemy_hero_ids: e, same_lane_filter: "true" })).then(r => { laneVs[e] = r; }).catch(() => {}));
+  let fl = null, curve = [], matchups = [];
+  jobs.push(() => getJSON(`/v1/analytics/item-flow-stats?${new URLSearchParams({ hero_ids: hero, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from, min_matches: MIN_GAMES })}`).then(res => {
+    fl = Object.assign(flowLifts(res.nodes, id => S.itemById[id]?.item_tier ?? null), { matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
+    let w = 0, sp = 0; for (const n of res.nodes || []) { const it = S.itemById[n.item_id]; if (!it) continue; if (it.item_slot_type === "weapon") w += n.matches; if (it.item_slot_type === "spirit") sp += n.matches; }
+    fl.lean = w + sp ? { weapon: w / (w + sp), spirit: sp / (w + sp) } : null;
+  }).catch(() => {}));
+  jobs.push(() => getJSON(`/v1/analytics/player-performance-curve?${new URLSearchParams({ resolution: 0, hero_ids: hero, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from })}`)
+    .then(pts => { curve = pts.map(x => ({ t: x.game_time, nw: x.net_worth_avg })).filter(x => x.nw != null).sort((a, b) => a.t - b.t); }).catch(() => {}));
+  jobs.push(() => getJSON(`/v1/analytics/hero-counter-stats?${new URLSearchParams({ min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from, same_lane_filter: false, min_matches: 20 })}`)
+    .then(rows => { matchups = rows.filter(r => r.hero_id === hero); }).catch(() => {}));
+  // Six at a time: well within the data service's limit of 200 statistics requests a minute.
+  let done = 0;
+  for (let i = 0; i < jobs.length; i += 6) { await Promise.all(jobs.slice(i, i + 6).map(f => f())); done += Math.min(6, jobs.length - i); reviewStatus(`Fetching the statistics the tool would have used… ${done} of ${jobs.length}`); }
+  return { stages, laneVs, fl, curve, matchups };
+}
+async function runReview() {
+  if (REVIEW.busy) return;
+  const id = String($("reviewMatch").value || "").trim();
+  if (!/^\d{5,}$/.test(id)) { reviewStatus("Type the match ID (the number in the bottom-right corner of your screen in game, or from your match history).", "warn"); return; }
+  REVIEW.busy = true; $("reviewGo").disabled = true; $("reviewBody").innerHTML = "";
+  try {
+    reviewStatus("Fetching the match details…");
+    let meta;
+    try { meta = await getJSON(`/v1/matches/${id}/metadata`); }
+    catch (e) {
+      reviewStatus(e.status === 404 ? "The details of that match aren't available yet. They usually arrive within an hour of the match ending (sometimes later); try again then."
+        : `Couldn't get the match details: ${e.message}`, "warn"); return;
+    }
+    const match = matchFromMetadata(meta);
+    const mine = match.players.filter(x => S.steam && x.account === S.steam.accountId);
+    const p = mine[0] || (match.players.filter(x => x.hero === S.me).length === 1 ? match.players.find(x => x.hero === S.me) : null);
+    for (const x of match.players) delete x.account;   // only needed to find you
+    if (!p) { reviewStatus(S.steam ? "Your Steam account isn't in that match. Check the match ID." : "Save your Steam account (Setup) so the tool can find you in the match, or pick the hero you played.", "warn"); return; }
+    ensureHero(p.hero, "match");
+    const enemies = match.players.filter(x => x.team !== p.team).map(x => x.hero).filter(h => ensureHero(h, "match"));
+    const laneIds = match.players.filter(x => x.team !== p.team && p.lane && x.lane === p.lane).map(x => x.hero);
+    const anchors = [...new Set(p.items.map(x => x[1]).filter(i => S.itemById[i]))].sort((a, b) => S.itemById[b].cost - S.itemById[a].cost).slice(0, 10);
+    const st = await reviewStats(p.hero, enemies, laneIds, anchors);
+    reviewStatus("Replaying the match…");
+    const G = { items: S.items, itemById: S.itemById, itemByClass: S.itemByClass, prog: S.prog };
+    const times = new Set();
+    for (const [bt, iid] of p.items) if (S.itemById[iid]) times.add(Math.max(1, bt - 1));
+    for (let t = 60; t < (match.dur || 2400); t += 60) times.add(t);
+    const moments = [];
+    replayPlayer({ match, p, st, G, times: [...times].sort((a, b) => a - b), heroName, abilities: heroAbilities(p.hero), onMoment: ({ t, owned, souls, alive, cap, res }) => {
+      const timing = {};
+      for (const [iid, s2] of res.scoredById) if (s2.timing?.outOfStage) timing[iid] = s2.timing.note;
+      moments.push({ t, owned, souls, alive, cap, order: res.order.map(x => ({ id: x.s.item.id, cost: x.s.cost, sell: x.sell ? x.sell.id : null })), timing });
+    } });
+    const r = reviewFindings({ p, moments, itemById: S.itemById, itemByClass: S.itemByClass, prog: S.prog, dur: match.dur });
+    REVIEW.last = { id, hero: p.hero, won: match.win != null ? p.team === match.win : null, dur: match.dur, ...r };
+    logEvent("review", { match: id, agree: r.agree, total: r.total, findings: r.findings.length });
+    renderReview();
+    reviewStatus(`Statistics: ${rankChoice().label}, ${timeWindow().label}, as set now.`);
+  } catch (e) { reviewStatus("The review failed: " + String(e.message || e).slice(0, 160), "warn"); noteUnexpectedError("review", e); }
+  finally { REVIEW.busy = false; $("reviewGo").disabled = false; }
+}
+function renderReview() {
+  const R = REVIEW.last, box = $("reviewBody"); if (!R) return;
+  const fmt = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+  const nm = id => S.itemById[id]?.name || "an item";
+  box.innerHTML = "";
+  const head = document.createElement("p");
+  head.innerHTML = `<b>${esc(heroName(R.hero))}</b>, match ${esc(R.id)}${R.dur ? `, ${Math.round(R.dur / 60)} min` : ""}${R.won == null ? "" : R.won ? ", won" : ", lost"}. `
+    + (R.total ? `${R.agree} of your ${R.total} purchases were in the tool's top 4 at the time.` : "No purchases found.");
+  box.append(head);
+  const h1 = document.createElement("h3"); h1.textContent = R.findings.length ? "Worth a look" : "Nothing stood out"; box.append(h1);
+  if (R.findings.length) { const ul = document.createElement("ul"); ul.className = "review-list"; for (const f of R.findings) { const li = document.createElement("li"); li.textContent = f.text; ul.append(li); } box.append(ul); }
+  else { const pz = document.createElement("p"); pz.className = "muted small"; pz.textContent = "No long stretches of unspent souls, no sales at a loss, nothing bought well after its time."; box.append(pz); }
+  const h2 = document.createElement("h3"); h2.textContent = "Your purchases and the tool's suggestions"; box.append(h2);
+  const tbl = document.createElement("table"); tbl.className = "review-table";
+  tbl.innerHTML = "<thead><tr><th>Time</th><th>You bought</th><th>The tool at that moment</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  for (const x of R.purchases) {
+    const tr = document.createElement("tr");
+    const tool = x.pos ? (x.partOf ? `Step ${x.pos} (part of ${nm(x.partOf)})` : x.pos === 1 ? "Its next buy" : `Step ${x.pos} of its plan`) : x.first ? `Not in its plan; next buy was ${nm(x.first)}` : "No plan";
+    for (const v of [fmt(x.t), nm(x.id), tool]) { const td = document.createElement("td"); td.textContent = v; tr.append(td); }
+    if (!x.pos) tr.className = "differs";
+    tb.append(tr);
+  }
+  tbl.append(tb); box.append(tbl);
+  const note = document.createElement("p"); note.className = "muted small";
+  note.textContent = "Differing from the tool isn't a mistake in itself: you saw the fight, it saw the statistics. Use the differences to ask why. The review replays the tool as it is now, with today's statistics, so it can differ a little from what you saw during the match.";
+  box.append(note);
+}
 function shortReason(s, kind, why) {
   if (why) return why;
   const fitText = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 2)
@@ -5134,6 +5428,11 @@ function renderNotes() {
   more.textContent = "Older versions: the full history is kept with the project.";
   box.append(more);
 }
+$("reviewOpen").onclick = () => openReview();
+$("reviewClose").onclick = () => { $("reviewOverlay").hidden = true; };
+$("reviewOverlay").onclick = e => { if (e.target === $("reviewOverlay")) $("reviewOverlay").hidden = true; };
+$("reviewGo").onclick = () => runReview();
+$("reviewMatch").onkeydown = e => { if (e.key === "Enter") runReview(); };
 $("notesOpen").onclick = () => { renderNotes(); $("notesOverlay").hidden = false; $("notesClose").focus(); };
 $("notesClose").onclick = () => { $("notesOverlay").hidden = true; };
 $("notesOverlay").onclick = e => { if (e.target === $("notesOverlay")) $("notesOverlay").hidden = true; };
@@ -5176,7 +5475,7 @@ $("fbCopy").onclick = async () => {
 };
 $("closePicker").onclick = () => { $("pickerOverlay").hidden = true; };
 $("pickerOverlay").onclick = e => { if (e.target === $("pickerOverlay")) $("pickerOverlay").hidden = true; };
-document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay"].forEach(id => { $(id).hidden = true; }); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay", "reviewOverlay"].forEach(id => { $(id).hidden = true; }); });
 $("toastUndo").onclick = () => (toastUndo || undoBought)();
 $("toastMore").onclick = () => { const f = toastMore; toastMore = null; $("toast").hidden = true; if (f) f(); };
 $("clockStart").onclick = () => { S.clockStart = Date.now(); S.clockStartedOnce = true; S.soulOffset = 0; saveMatch(); tickClock(); loadCurve(); updateSouls(true); };
