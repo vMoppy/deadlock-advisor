@@ -297,7 +297,7 @@
     </span>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.9.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v2.10</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="reviewOpen" class="linkbtn small" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
@@ -521,10 +521,14 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.9.1";   // shown in the top bar and written into match records
+const VERSION = "v2.10";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v2.10", date: "October 15, 2026", items: [
+    "The tool reads every hero's abilities. Item details name the enemy ability an item answers (\"Abrams: Seismic Impact (stun)\"), and the match summary says when the enemy team has unusually much crowd control, healing or slows, even without a live link. Information only: real matches showed the statistics already allow for enemy abilities.",
+    "Your own abilities and your teammates' count: as Venator, your grenade's healing reduction already covers part of the need for a healing reduction item.",
+    "Debuff resist and slow resist items (Debuff Reducer, Juggernaut...) count as partial answers to crowd control and slows, in proportion to their percentage."] },
   { v: "v2.9.1", date: "October 15, 2026", items: [
     "When a teammate already applies healing reduction or resist reduction, the tool suggests your own much less: in real matches a second one added little.",
     "Checked against about 10,000 real matches, including a new rank range: everything else was confirmed or kept, so your buy order barely changes otherwise.",
@@ -1711,7 +1715,8 @@ function spentOn(owned, itemById) { let s = 0; for (const id of owned) s += item
    so this part works from what items do. Each item's effects are read from its own data (stat names,
    labels and description), never from a hand-made list, so new or changed items are handled. */
 const TAG_NAMES = { sustain: "healing", antiheal: "healing reduction", cc: "crowd control", cleanse: "debuff protection",
-  bulletRes: "bullet resist", spiritRes: "spirit resist", bulletShred: "bullet resist reduction", spiritShred: "spirit resist reduction", aura: "aura", invest: "builds value over time" };
+  bulletRes: "bullet resist", spiritRes: "spirit resist", bulletShred: "bullet resist reduction", spiritShred: "spirit resist reduction", aura: "aura", invest: "builds value over time",
+  debuffRes: "debuff resist", slowRes: "slow resist", slow: "slows" };
 
 /* What an item does, for the match-aware layer. From v2.8.4 the game's own stat names decide where they exist (Deadlock
    calls spirit "Tech" and bullet resist "Armor"), and the description only adds what it says plainly. Up to v2.8.3 broad
@@ -1768,6 +1773,9 @@ function itemTags(it) {
       || has(/^(MovementSpeedSlow|StunDuration|SilenceDuration|FreezeDuration|TetherDuration|DisarmDuration|ImmobilizeDuration|SleepDuration)$/)
       || P.some(([k, v]) => k === "SlowPercent" && /move\s*speed/i.test(v.label || "")))
     : /\bstun|\broot|silence|disarm|\bsleep|\bslow(s|ed|ing)?\b(?!\s*resist)|knock\s*(up|down|back)|immobili|containment|suppress|\bhex|\bcurse/.test(t)) tags.add("cc");
+  // Debuff resist and slow resist (v2.10): partial answers to crowd control, sized by their percentage (answerSize).
+  if (num("StatusResistancePercent") > 0 || num("InnateStatusResistancePercent") > 0 || (!keyed && /debuff\s*resist/.test(t))) tags.add("debuffRes");
+  if (num("SlowResistancePercent") > 0 || (!keyed && /slow\s*resist/.test(t))) tags.add("slowRes");
   if (/aura/.test(t)) tags.add("aura");
   // Value that builds up the longer you own it: souls per minute, growing or permanent stacks. Bought late,
   // there's little match left to collect it (e.g. Golden Goose Egg: "grows the longer you hold onto it").
@@ -1812,8 +1820,22 @@ function fedWeights(roster, enemies) {
 }
 
 /* Sum up what the enemy team and your teammates have built. */
-function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyWeight, refs = null }) {
+function matchProfile({ enemyItems, teamItems, myItems, itemById, tagsOf, enemyWeight, refs = null, kits = null }) {
   const P = { sustain: [], cc: [], bulletRes: [], spiritRes: [], weaponCost: 0, spiritCost: 0, teamHas: new Set(), teamItems: new Set(), myWeapon: 0, mySpirit: 0, myHas: new Map(), myFrac: new Map(), refs };
+  /* Hero kits (v2.10). kits: { of: hero -> kit effects, mine: your kit, avg: what an average team brings, sec }. The enemies'
+     kits feed the needs (mechNeeds); the healing and resist reduction that your own and your teammates' abilities already
+     apply cover part of those needs, as the game stacks them. */
+  if (kits) {
+    const sec = kits.sec;
+    P.kit = { sec, avg: kits.avg || {}, enemies: [...enemyItems.keys()].map(e => ({ enemy: e, w: enemyWeight.get(e) || 1, kit: kits.of(e) || [] })), team: {}, mine: {} };
+    for (const tag of STACKS) {
+      const mine = kitFraction(kits.mine, tag, sec);
+      if (mine.frac > 0) P.kit.mine[tag] = mine;
+      let left = 1; const who = [];
+      for (const mate of teamItems.keys()) { const f = kitFraction(kits.of(mate), tag, sec); if (f.frac > 0) { left *= 1 - f.frac; who.push({ mate, names: f.names }); } }
+      if (who.length) P.kit.team[tag] = { frac: 1 - left, who };
+    }
+  }
   for (const [enemy, ids] of enemyItems) {
     const w = enemyWeight.get(enemy) || 1;
     for (const id of ids) {
@@ -1914,6 +1936,121 @@ function overlapOf(it, ownedItems, tagsOf, itemByClass = {}) {
 }
 const sat = x => 1 - Math.exp(-x);   // more of a threat helps less and less
 
+/* ---------- Hero kits (v2.10): what each hero's abilities do to enemies ----------
+   Read from the game data like item tags: the ability's stats first, then its description, and the T1 to T3 upgrade texts
+   for what upgrades add. Never a hand-made list, so a new hero or a reworked ability is read the same way.
+   Effects: crowd control by kind (hard: stun, sleep, silence, hex, immobilize, disarm, petrify, tether, lift and the like;
+   displace: knock up, knock back, pull; slow), healing (including lifesteal and healing allies), and debuffs that answer what
+   items answer: healing reduction and bullet or spirit resist reduction, with their size where a number says it.
+   Returns [{ tag, kind, size, tier, ability }] (tier 0: the ability itself; 1 to 3: an upgrade). Effects on yourself don't
+   count ("you stun yourself", "slows affect you", "your move speed is reduced"). */
+const KIT_HARD = { stun: /\bstun/, sleep: /\bsleep|\basleep/, silence: /silenc/, hex: /\bhex(es|ed|ing)?\b/, immobilize: /immobiliz|\broot(s|ed)?\b/,
+  disarm: /disarm/, petrify: /petrif(y|ies|ied)\b(?!'s)/, tether: /\btethers?\s+enemies|chain\s+nearby\s+enemies|cannot\s+use\s+movement\s+abilities/,
+  lift: /lift\s+an\s+enemy|lifted\s+and|cannot\s+take\s+actions?|unable\s+to\s+(perform|take)\s+(most\s+)?actions|time-?stop|physical\s+body|hold\s+the\s+target\s+in\s+place|apply\w*\s+curse|curse\s+an\s+enemy|\bgrab\s+an\s+enemy/ };
+const KIT_HARD_KEYS = { stun: /^StunDuration$/, sleep: /^SleepDuration$/, silence: /^SilenceDuration$/, hex: /^HexDuration$/, immobilize: /^ImmobilizeDuration$/, petrify: /^PetrifyDuration$/ };
+const KIT_DISPLACE = /knock(ed)?\s*(up|back)|knocks?\s+(enemies|them|targets)|knockup|knockback|\bpull(s|ing)?\s+(the|all|nearby|enem|target|them|in\b|down)|\bpulling\b|\byank|launch(es)?\s+you\s+and\s+nearby\s+enemies|swaps?\s+your\s+position|lifting\s+them|sends?\s+(\w+\s+){0,2}into\s+the\s+air|push(es|ing)?\s+enemies/;
+const KIT_SLOW = /\bslow(s|ed|ing)?\b|move(ment)?\s+speed\s+(penalty|reduction)|reduc\w*\s+(\w+\s+){0,4}move(ment)?\s+speed|reduc\w*\s+(their\s+)?movement\b|-\d+(\.\d+)?%\s+(move|movement)/;
+const KIT_ANTIHEAL = /(-\d+(\.\d+)?)%\s+(incoming\s+)?heal\w*|reduc\w*\s+(\w+\s+){0,2}heal\w*(\s+by\s+-?\d+(\.\d+)?%)?|prevents?\s+(all\s+)?heal\w*|cannot\s+(\w+\s+){0,3}heal/;
+function kitText(s, heroName) {
+  let t = String(s || "").replace(/<svg[\s\S]*?<\/svg>/gi, " ").replace(/<br\s*\/?>/gi, " | ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").toLowerCase();
+  if (heroName) t = t.split(heroName.toLowerCase()).join("you");
+  // Resists and immunities for you or allies, and things that aren't slowing an enemy, aren't effects on enemies.
+  t = t.replace(/slow\s*resist\w*|debuff\s*resist\w*|immun\w*\s+(from|to)\s+slows?|slows?\s+down\b|slow(s|ing)?\s+(\w+\s+)?fire\s+rate|ignores?\s+petrify\S*/g, " ");
+  // Effects on yourself ("you stun yourself", "slows affect you", "your move speed is reduced"); "your victims" are enemies.
+  t = t.replace(/\byour\s+(victims?|targets?|enemies)\b/g, "the $1");
+  return t.split(/\.(?!\d)|\|/).filter(c => !/\b(you|your|yourself)\b[^,]*\b(stun\w*|slow\w*|silenc\w*|sleep\w*|knocked|reduced move speed|move speed is reduced)\b|\b(stun|slow)s?\s+(affect\s+)?you(rself)?\b|you\s+are\s+(knocked|stunned)/.test(c)).join(". ");
+}
+const KIT_HEAL_TEXT = /\bheal(s|ed|ing)?\b|lifesteal|life\s*steal|\bregenerat|health\s+regen|drains?\s+(enemy\s+)?health|steal\w*\s+life|restore\s+health/;
+function kitEffects(ab, heroName = "") {
+  const out = [];
+  if (!ab) return out;
+  const P = Object.entries(ab.properties || {}).filter(([, v]) => v && v.value != null && parseFloat(v.value) !== 0);
+  const num = re => { let m = 0; for (const [k, v] of P) if (re.test(k)) m = Math.max(m, Math.abs(parseFloat(v.value)) || 0); return m; };
+  const d = ab.description || {};
+  const texts = [kitText(d.desc || d.passive || d.active, heroName), kitText(d.t1_desc, heroName), kitText(d.t2_desc, heroName), kitText(d.t3_desc, heroName)];
+  /* An ability's stats include numbers that only its upgrades use (Riposte lists the lifesteal its T3 adds), so the
+     description decides what the ability itself does, and the stats give the size. Only an ability with no description
+     (a few in the game data) is read from its stats. */
+  const noDesc = !texts[0].replace(/[\s.]/g, "");
+  const add = (tag, kind, size, tier) => { if (!out.some(e => e.tag === tag && e.kind === kind && e.tier <= tier)) out.push({ tag, kind, size: Math.round(size * 1000) / 1000, tier, ability: ab.name }); };
+  const stacks = num(/^(MaxStacks|MaxRats)$/) || 5;
+  texts.forEach((t, tier) => {
+    const base = tier === 0, fromStats = base && noDesc;
+    // Crowd control.
+    for (const [kind, re] of Object.entries(KIT_HARD)) if (re.test(t) || (fromStats && KIT_HARD_KEYS[kind] && num(KIT_HARD_KEYS[kind]))) add("cc", kind, 1, tier);
+    if (KIT_DISPLACE.test(t)) add("cc", "displace", 0.5, tier);
+    if (KIT_SLOW.test(t) || (fromStats && P.some(([k]) => /slow/i.test(k) && !/resist|self|channel|limit|duration|immun|hooking|effectiveness|firerate/i.test(k)))) add("slow", "slow", 1, tier);
+    // Healing reduction on enemies; then healing (yours or your allies'), which is what healing reduction answers.
+    const ah = KIT_ANTIHEAL.exec(t), pen = num(/^HealAmp(Receive|Regen)PenaltyPercent$/);
+    if (ah || (fromStats && pen)) {
+      const n = /(-?\d+(\.\d+)?)%/.exec(ah ? ah[0] : "");
+      add("antiheal", "antiheal", Math.min(0.9, base && pen ? pen / 100 : n ? Math.abs(parseFloat(n[1])) / 100 : /prevents?\s+all|cannot/.test(ah ? ah[0] : "") ? 0.9 : 0.3), tier);
+    }
+    const th = t.replace(new RegExp(KIT_ANTIHEAL.source, "g"), " ").replace(/stamina\s+regen\w*/g, " ");
+    if (KIT_HEAL_TEXT.test(th) || (fromStats && (() => { const h = healTraits(ab); return h.heals || h.lifesteal; })())) add("sustain", "heal", 1, tier);
+    // Resist reduction on enemies (reduce, shred or steal), sized by its number; per-bite or per-stack numbers times the stacks.
+    for (const [tag, word, keys] of [["bulletShred", "bullet", /^(BulletResistReduction|BulletArmorReduction|ArmorReductionPerBite)$/], ["spiritShred", "spirit", /^(TechArmorDamageReduction|SpiritResistReduction|TechResistReduction|MagicResistReduction|MaxStolenSpiritResist|TechArmorDamageReductionPerStack)$/]]) {
+      const m = new RegExp(`(-\\d+(\\.\\d+)?)%\\s+${word}\\s+resist|reduce\\s+${word}\\s+resist\\s+by\\s+(-?\\d+(\\.\\d+)?)`).exec(t);
+      const said = new RegExp(`(reduc|shred|steal)\\w*[^.]{0,40}\\b${word}\\s+(resist|armou?r)|${word}\\s+resist\\s+(reduction|shred|reduced)`).test(t);
+      if (!(m || said || (fromStats && num(keys)))) continue;
+      let size = 0;
+      if (base) for (const [k, v] of P) if (keys.test(k)) size = Math.max(size, Math.abs(parseFloat(v.value)) * (/PerBite|PerStack/.test(k) ? stacks : 1) / 100);
+      if (m) size = Math.abs(parseFloat(m[1] || m[3])) / 100;
+      add(tag, tag, Math.min(0.9, size || 0.1), tier);
+    }
+  });
+  return out;
+}
+/* A hero's kit: the effects of their four abilities (signature1 to signature4 in the game data). */
+const KIT_CACHE = new Map();
+function heroKit(hero, abilityByClass) {
+  if (!hero) return [];
+  const key = hero.id + ":" + (abilityByClass ? Object.keys(abilityByClass).length : 0);
+  if (KIT_CACHE.has(key)) return KIT_CACHE.get(key);
+  const abs = Object.entries(hero.items || {}).filter(([s]) => /^signature\d$/.test(s)).map(([s, c]) => ({ slot: s, ab: abilityByClass?.[c] })).filter(x => x.ab);
+  const out = abs.flatMap(({ slot, ab }) => kitEffects(ab, hero.name).map(e => ({ ...e, ult: slot === "signature4" })));
+  KIT_CACHE.set(key, out);
+  return out;
+}
+/* How much of a kind of effect a kit brings at a game time: each ability counts once, for its strongest effect of that kind
+   (a stun counts 1, a knock-up or pull 0.5). Upgrades count half, phased in as they're usually bought (T1 from 5:00, T2
+   from 10:00, T3 from 18:00, over 7 minutes each). */
+const KIT_UPG = 0.5, KIT_UPG_AT = [0, 300, 600, 1080], KIT_UPG_RAMP = 420;
+const kitAvail = (tier, sec) => tier === 0 ? 1 : KIT_UPG * Math.max(0, Math.min(1, ((sec ?? 1200) - KIT_UPG_AT[tier]) / KIT_UPG_RAMP));
+function kitAmount(kit, tag, sec) {
+  const by = new Map();
+  for (const e of kit || []) if (e.tag === tag) {
+    const v = (tag === "cc" ? e.size : 1) * kitAvail(e.tier, sec);
+    if (v > 0 && !(by.get(e.ability)?.v >= v)) by.set(e.ability, { v, e });
+  }
+  const parts = [...by.values()].sort((a, b) => b.v - a.v);
+  return { total: parts.reduce((a, x) => a + x.v, 0), parts };
+}
+/* A debuff a kit applies (healing or resist reduction), as a fraction, combined over its abilities as the game stacks them. */
+function kitFraction(kit, tag, sec) {
+  let left = 1; const names = [];
+  for (const e of kit || []) if (e.tag === tag) { const a = kitAvail(e.tier, sec); if (a > 0) { left *= 1 - Math.min(0.9, e.size) * a; names.push(e.ability); } }
+  return { frac: 1 - left, names: [...new Set(names)] };
+}
+/* kitOf and kitAvg for the engine, from the game data: heroes (with their ability class names) and abilities by class name.
+   The average is over playable heroes, kept per 30 s of game time. */
+function kitSource(heroes, abilityByClass) {
+  const byId = new Map((heroes || []).map(h => [h.id, h]));
+  // Every playable hero whose abilities are in the game data, including those whose abilities do none of these things.
+  const playable = (heroes || []).filter(h => h.player_selectable !== false && !h.disabled && Object.entries(h.items || {}).some(([k, c]) => /^signature\d$/.test(k) && abilityByClass?.[c]));
+  const all = playable.map(h => heroKit(h, abilityByClass));
+  const avgCache = new Map();
+  return { kitOf: id => heroKit(byId.get(Number(id)) || byId.get(id), abilityByClass),
+    kitAvg: sec => { const k = Math.round((sec ?? 1200) / 30); if (!avgCache.has(k)) avgCache.set(k, kitAverages(all, k * 30)); return avgCache.get(k); } };
+}
+/* What an average team's kits bring (every playable hero equally), to compare this match's enemies with: the hero
+   statistics already reflect a typical enemy team, so only the difference from it is new information. */
+function kitAverages(kits, sec) {
+  const out = {};
+  for (const tag of ["cc", "sustain", "slow"]) { const v = kits.map(k => kitAmount(k, tag, sec).total); out[tag] = v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; }
+  return out;
+}
+
 /* How strongly each kind of answer is needed, with the reasons. */
 function mechNeeds(P, heroName) {
   const names = list => [...new Set(list.map(x => heroName(x.enemy)))].slice(0, 3).join(", ");
@@ -1922,9 +2059,18 @@ function mechNeeds(P, heroName) {
   // An answer you already own covers part of the need: for debuffs that stack (healing and resist reduction), what's left is
   // 1 - the share you already apply (v2.8.6; up to v2.8.5 a fixed 25 to 30% was kept, "debuffs don't stack"); for the
   // others, OWN_LEFT.
-  const add = (tag, strength, why) => {
+  const covered = (tag, strength, why) => {
     const mine = P.myHas?.get(tag);
     if (mine) { strength *= STACKS.has(tag) && P.myFrac?.has(tag) ? 1 - P.myFrac.get(tag) : OWN_LEFT[tag] ?? 1; why += `; you already have ${TAG_NAMES[tag]} (${mine})`; }
+    // Your own abilities and your teammates' (v2.10): what they already apply, stacked as the game does.
+    const mk = P.kit?.mine?.[tag];
+    if (mk) { strength *= 1 - mk.frac; why += `; your ${mk.names.join(" and ")} already appl${mk.names.length > 1 ? "y" : "ies"} ${Math.round(mk.frac * 100)}% ${TAG_NAMES[tag]}`; }
+    const tk = P.kit?.team?.[tag];
+    if (tk) { strength *= 1 - tk.frac; why += `; teammates' abilities already apply it (${tk.who.map(x => `${heroName(x.mate)}: ${x.names.join(", ")}`).join("; ")})`; }
+    return [strength, why];
+  };
+  const add = (tag, strength, why) => {
+    [strength, why] = covered(tag, strength, why);
     if (strength > 0.05) needs[tag] = { strength: Math.min(1, strength), why };
   };
   // Debuffs on the enemy (healing and resist reduction) are shared: teammates who already apply one cover most of the need
@@ -1949,22 +2095,72 @@ function mechNeeds(P, heroName) {
     `${P.bulletRes.length} enemy bullet-resist item${P.bulletRes.length > 1 ? "s" : ""} (${names(P.bulletRes)})` + teamTxt("bulletShred", "bullet resist reduction"));
   add("spiritShred", sat(sum(P.spiritRes) / 3) * (0.4 + 0.6 * (1 - myGun)) * teamF("spiritShred"),
     `${P.spiritRes.length} enemy spirit-resist item${P.spiritRes.length > 1 ? "s" : ""} (${names(P.spiritRes)})` + teamTxt("spiritShred", "spirit resist reduction"));
+  /* The enemies' abilities (v2.10): crowd control, healing and slows, compared with what an average team's abilities bring.
+     More than average makes the answer more needed; less than average, less (the statistics behind every item already
+     reflect a typical enemy team). Each enemy counts by their threat and how far ahead they are, like their items.
+     Strength between -1 and 1: the share above or below average. */
+  if (P.kit) {
+    const { sec, avg } = P.kit;
+    for (const [src, key, answer, label] of [["cc", "kit:cc", "cleanse", "crowd control"], ["sustain", "kit:sustain", "antiheal", "healing"], ["slow", "kit:slow", "slowRes", "slows"]]) {
+      let have = 0, usual = 0; const parts = [];
+      for (const x of P.kit.enemies) {
+        const k = kitAmount(x.kit, src, sec);
+        have += x.w * k.total; usual += x.w * (avg[src] || 0);
+        for (const p of k.parts) parts.push({ w: x.w * p.v, text: `${heroName(x.enemy)}: ${p.e.ability}${src === "cc" ? ` (${p.e.kind === "displace" ? "knock-up or pull" : p.e.kind})` : ""}` });
+      }
+      if (!(usual > 0)) continue;
+      let r = Math.max(-1, Math.min(1, (have - usual) / usual));
+      const top = parts.sort((a, b) => b.w - a.w).slice(0, 3).map(p => p.text).join(", ");
+      let why = r > 0 ? `the enemies' abilities: ${Math.round(r * 100)}% more ${label} than an average team (${top})` : `the enemies' abilities bring ${Math.round(-r * 100)}% less ${label} than an average team`;
+      if (r > 0) [r, why] = covered(answer, r, why);
+      if (Math.abs(r) > 0.05) needs[key] = { strength: r, why, kit: src, answer };
+    }
+  }
   return needs;
 }
+/* How much of an answer an item is to a need (v2.10 adds debuff and slow resist): the item's own effect, sized as before;
+   for crowd control, debuff resist answers its share (25% shorter crowd control answers a quarter of it); for slows, slow
+   resist (or debuff resist) answers its share. Active items count ACTIVE_SHARE of a resist. */
+function answerSize(it, tag, refs, tags) {
+  if (tags.has(tag)) {
+    if (tag !== "slowRes") return tagSize(it, tag, refs);
+  }
+  const pct = k => Math.max(0, ...k.map(x => parseFloat(it.properties?.[x]?.value) || 0)) / 100 * (it.is_active_item ? ACTIVE_SHARE : 1);
+  if (tag === "cleanse" && tags.has("debuffRes")) return Math.min(1, pct(["StatusResistancePercent", "InnateStatusResistancePercent"]));
+  if (tag === "slowRes") return Math.min(1, Math.max(tags.has("slowRes") ? pct(["SlowResistancePercent"]) || 0.25 : 0, tags.has("debuffRes") ? pct(["StatusResistancePercent", "InnateStatusResistancePercent"]) : 0));
+  return 0;
+}
+/* How much each kind of need from the enemies' abilities counts in an item's value (v2.10): nothing. Measured on the backtest
+   (10,461 players in real matches at three rank ranges, statistics from before them): with the enemies' kits at full weight,
+   the part they'd add predicted nothing (crowd control: slope 0.37, between -4.0 and 4.8; healing: -2.1, between -5.0 and
+   1.0) or went the wrong way (slows: -16, between -30 and -4). The statistics already contain each enemy hero's kit (their
+   per-enemy numbers are measured against that hero), so counting the kit again adds nothing. They're shown as information
+   (which enemy and ability an item answers), not counted. Your own and your teammates' kits, and debuff and slow resist as
+   partial answers, do count (they change what you already have, not the enemy): no change in the advice edge (0.00 and
+   +0.04 at the holdout rank range). */
+const KIT_W = { cc: 0, sustain: 0, slow: 0 };
 
 /* Score one candidate item against the needs of this match. */
 function mechFor(it, needs, P, tagsOf) {
   const tags = tagsOf(it);
-  let score = 0; const why = []; const warn = [];
-  for (const [tag, n] of Object.entries(needs)) {
-    if (!tags.has(tag)) continue;
-    const size = tagSize(it, tag, P.refs);
-    score += MECH_W * n.strength * size;
-    const m = SIZE_KEYS[tag] ? tagMagnitude(it, tag) : null;
-    why.push(`Answers ${n.why}` + (size < 0.95 && m != null ? ` (partly: ${m}% ${TAG_NAMES[tag]}${it.is_active_item ? " while active" : ""})` : ""));
+  let score = 0; const why = []; const warn = []; const info = []; const kit = {};
+  for (const [key, n] of Object.entries(needs)) {
+    const tag = n.answer || key;
+    const size = answerSize(it, tag, P.refs, tags);
+    if (!(size > 0)) continue;
+    const part = MECH_W * n.strength * size;
+    if (n.kit) { kit[n.kit] = part; score += KIT_W[n.kit] * part; } else score += part;
+    // Which number made it a partial answer: its own effect's, or a resist's.
+    const via = tags.has(tag) && tag !== "slowRes" ? null : tag === "slowRes" && tags.has("slowRes") ? ["slowRes", "SlowResistancePercent"] : ["debuffRes", "StatusResistancePercent"];
+    const m = via ? parseFloat(it.properties?.[via[1]]?.value) || null : SIZE_KEYS[tag] ? tagMagnitude(it, tag) : null;
+    const partly = size < 0.95 && m != null ? ` (partly: ${m}% ${TAG_NAMES[via ? via[0] : tag]}${it.is_active_item ? " while active" : ""})` : "";
+    // A need that isn't counted (KIT_W 0) is information: what this answers in the enemy team, not a reason for its rank.
+    if (n.kit && !KIT_W[n.kit]) info.push(n.strength > 0 ? `answers ${n.why.replace(/^the enemies' abilities: /, "")}${partly}` : `${n.why.replace(/^the enemies' abilities bring/, "they bring")}`);
+    else if (n.strength > 0) why.push(`Answers ${n.why}` + partly);
+    else warn.push(`Less needed: ${n.why}`);
   }
   if (tags.has("aura") && P.teamItems.has(it.id)) { score -= MECH_W * 0.5; warn.push("A teammate already has this aura item"); }
-  return { score, why, warn };
+  return { score, why, warn, info, kit };
 }
 
 /* ---------- Live value decoding ----------
@@ -2040,7 +2236,7 @@ const tagsOf = it => { let t = TAG_CACHE.get(it.id); if (!t) { t = itemTags(it);
    souls, lane (Set of lane opponents), threatW (enemy weights), fed, fl (stage data or null), sec (game time),
    curve (net worth curve), slotCap, skipped (Set), prevOrder (the previous plan), roster (live players, or null),
    me (your hero), heroName (function). */
-function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, lane, threatW, fed, fl, sec, curve, slotCap, skipped, prevOrder, roster, me, heroName, abilities = [], bought = {} }) {
+function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, lane, threatW, fed, fl, sec, curve, slotCap, skipped, prevOrder, roster, me, heroName, abilities = [], bought = {}, kitOf = null, kitAvg = null }) {
   const wsum = ready.reduce((a, p) => a + p.w, 0);
   // Items already inside something you own (Sprint Boots inside Enduring Speed...) aren't recommended again.
   const covered = coveredBy(owned, prog || { parts: new Map() });
@@ -2073,20 +2269,26 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   for (const s of merged) s.amp = ampSupport(s.item, ownedItems, abilities);
   // Items that do the same job as one you own (v2.8.5).
   for (const s of merged) s.overlap = overlapOf(s.item, ownedItems, tagsOf, itemByClass);
-  // Match-aware layer: only with live items for the players in this match.
+  /* Match-aware layer: with live items for the players in this match, and (v2.10) with the enemy heroes alone, from their
+     abilities (kitOf: hero -> kit effects; kitAvg: game time -> what an average team's kits bring). */
   let match = null;
-  if (roster && roster.has(me)) {
-    const myTeam = String(roster.get(me).team);
+  const live = !!(roster && roster.has(me));
+  const kavg = kitOf && kitAvg ? kitAvg(sec) : null;
+  const kits = kavg && kavg.cc > 0 ? { of: kitOf, mine: kitOf(me), avg: kavg, sec } : null;   // only with kits read from the game data
+  if (live || (kits && threatW?.size)) {
     const enemyItems = new Map(), teamItems = new Map();
-    for (const [h, p] of roster) {
-      if (h === me) continue;
-      (String(p.team) === myTeam ? teamItems : enemyItems).set(h, p.items || []);
-    }
-    const P = matchProfile({ enemyItems, teamItems, myItems: owned, itemById, tagsOf, enemyWeight: threatW, refs: tagRefs(items) });
+    if (live) {
+      const myTeam = String(roster.get(me).team);
+      for (const [h, p] of roster) {
+        if (h === me) continue;
+        (String(p.team) === myTeam ? teamItems : enemyItems).set(h, p.items || []);
+      }
+    } else for (const e of threatW.keys()) enemyItems.set(e, []);
+    const P = matchProfile({ enemyItems, teamItems, myItems: owned, itemById, tagsOf, enemyWeight: threatW, refs: tagRefs(items), kits });
     if (fl?.lean) { P.myWeapon += fl.lean.weapon * 3000; P.mySpirit += fl.lean.spirit * 3000; }   // your hero's usual lean
     const needs = mechNeeds(P, heroName);
-    for (const s of merged) { const m = mechFor(s.item, needs, P, tagsOf); s.mechScore = m.score; s.mechWhy = m.why; s.mechWarn = m.warn; }
-    match = { P, needs, fed, enemyItemCount: [...enemyItems.values()].reduce((a, l) => a + l.length, 0) };
+    for (const s of merged) { const m = mechFor(s.item, needs, P, tagsOf); s.mechScore = m.score; s.mechWhy = m.why; s.mechWarn = m.warn; s.mechInfo = m.info; s.kitParts = m.kit; }
+    match = { P, needs, fed, live, enemyItemCount: [...enemyItems.values()].reduce((a, l) => a + l.length, 0) };
   }
   const scoredById = new Map(merged.map(s => [s.item.id, s]));
   // Items you've said you don't want are left out of every list and the plan for this match (still shown in details).
@@ -2201,7 +2403,7 @@ const aliveAt = (p, t) => !(p.deaths || []).some(([d, len]) => t >= d && t < d +
    curve, matchups: hero-counter rows, pairs (optional): { whole: whole-match item rows, pairs: item pair rows }, all (optional):
    { stages: { lane|mid|late: { baseline, perEnemy } } } at all ranks }. G: { items,
    itemById, itemByClass, prog }. onMoment(info) gets each moment. */
-function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abilities = [], slotCap = null, onMoment }) {
+function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abilities = [], slotCap = null, onMoment, kitOf = null, kitAvg = null }) {
   const hero = p.hero;
   const enemies = match.players.filter(x => x.team !== p.team).map(x => x.hero);
   const laneIds = new Set(match.players.filter(x => x.team !== p.team && p.lane && x.lane === p.lane).map(x => x.hero));
@@ -2235,7 +2437,7 @@ function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abili
     const bought = {}; for (const id of owned) bought[id] = boughtInfo[id] || { sec: held.get(id), rate: null };
     const cap = slotCap ?? Math.max(BASE_SLOTS, maxHeld);
     const res = computePlan({ ready, items: G.items, itemById: G.itemById, itemByClass: G.itemByClass, prog: G.prog, owned, souls, lane: laneIds, threatW, fed,
-      fl: st.fl || null, sec: t, curve: st.curve || [], slotCap: cap, skipped: new Set(), prevOrder, roster, me: hero, heroName, abilities, bought });
+      fl: st.fl || null, sec: t, curve: st.curve || [], slotCap: cap, skipped: new Set(), prevOrder, roster, me: hero, heroName, abilities, bought, kitOf, kitAvg });
     lastPV = res.purchaseValues; lastOwned = owned;
     prevOrder = res.order.map(x => ({ id: x.s.item.id, kind: x.kind, cost: x.s.cost }));
     onMoment({ t, owned, held, souls, nw, cap, alive: aliveAt(p, t), res });
@@ -2306,6 +2508,12 @@ function reviewFindings({ p, moments, itemById, itemByClass, prog, dur = null })
 }
 
 /* ---------- Setup pickers ---------- */
+/* Every hero's kit, for what the match needs (v2.10): read once from the game data. */
+function kitsNow() {
+  if (!S.abilityByClass || !S.heroAll?.length) return {};
+  if (!S.kitSrc || S.kitSrc.heroes !== S.heroAll || S.kitSrc.abc !== S.abilityByClass) S.kitSrc = { heroes: S.heroAll, abc: S.abilityByClass, ...kitSource(S.heroAll, S.abilityByClass) };
+  return { kitOf: S.kitSrc.kitOf, kitAvg: S.kitSrc.kitAvg };
+}
 /* Your hero's four abilities from the game data (for what they do, e.g. whether they heal). Empty if unknown. */
 function heroAbilities(heroId) {
   const h = S.heroById[heroId]; if (!h || !h.items) return [];
@@ -4529,7 +4737,7 @@ async function runReview() {
     for (const [bt, iid] of p.items) if (S.itemById[iid]) times.add(Math.max(1, bt - 1));
     for (let t = 60; t < (match.dur || 2400); t += 60) times.add(t);
     const moments = [];
-    replayPlayer({ match, p, st, G, times: [...times].sort((a, b) => a - b), heroName, abilities: heroAbilities(p.hero), onMoment: ({ t, owned, souls, alive, cap, res }) => {
+    replayPlayer({ match, p, st, G, times: [...times].sort((a, b) => a - b), heroName, abilities: heroAbilities(p.hero), ...kitsNow(), onMoment: ({ t, owned, souls, alive, cap, res }) => {
       const timing = {};
       for (const [iid, s2] of res.scoredById) if (s2.timing?.outOfStage) timing[iid] = s2.timing.note;
       moments.push({ t, owned, souls, alive, cap, order: res.order.map(x => ({ id: x.s.item.id, cost: x.s.cost, sell: x.sell ? x.sell.id : null })), timing });
@@ -4691,8 +4899,9 @@ function detailLines(s, kind, souls, entry) {
     for (const f of (s.fits || []).filter(f => f.z <= -WEAK_Z)) {
       lines.push(`Pairs poorly with <b>${esc(itemName(f.anchorId))}</b> (<span class="down">${pts(f.lift)} pts</span>${f.src === "pair" ? ", players who bought both at any point" : ""}). It may overlap with what that item already does.`);
     }
-    for (const w of s.mechWhy || []) lines.push(`<b>Live match:</b> ${esc(w)}.`);
+    for (const w of s.mechWhy || []) lines.push(`<b>${S.view?.match?.live === false ? "This match" : "Live match"}:</b> ${esc(w)}.`);
     for (const w of s.mechWarn || []) lines.push(`<span class="down">${esc(w)}</span>, so this is ranked lower.`);
+    for (const w of s.mechInfo || []) lines.push(`<b>Enemy abilities:</b> ${esc(w)} <span class="muted">(for information: real matches showed the statistics already allow for them, so it doesn't change the rank)</span>.`);
     lines.push(`Usually bought around minute <span class="num">${Math.round(s.base.avg_buy_time_s / 60)}</span>.`);
   } else {
     lines.push(kind === "owned" ? `You own this. It counts toward your build in every recommendation.`
@@ -4784,6 +4993,8 @@ function renderDetail(entry, souls, labelText) {
   const fits = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 3)
     .map(f => [`with ${itemName(f.anchorId)}`, `${pts(f.lift)} pts`, "up"]);
   const live = (s.mechWhy || []).map(x => [x, null]);
+  // The enemies' abilities (v2.10): what this answers, for information (not counted in its rank: see KIT_W).
+  const kitInfo = (s.mechInfo || []).map(x => [x[0].toUpperCase() + x.slice(1), null]);
   if (s.amp && !s.amp.none) fits.push([`Amplifies your healing from ${s.amp.sources.slice(0, 3).join(", ")}${s.amp.sources.length > 3 ? " and more" : ""}`, null]);
   const warns = [...(s.vs || []).filter(x => x.z <= -WEAK_Z).map(x => [`vs ${heroName(x.enemyId)}`, `${pts(x.lift)} pts`, "down"]),
     ...(s.fits || []).filter(f => f.z <= -WEAK_Z).map(f => [`with ${itemName(f.anchorId)} (may overlap)`, `${pts(f.lift)} pts`, "down"]),
@@ -4815,7 +5026,7 @@ function renderDetail(entry, souls, labelText) {
   const timeline = (s.flow?.cols || []).map((x, c) => x ? [`Bought at ${FLOW_COLS[c]}${c === k ? " (now)" : ""}: ${x.n.toLocaleString()} games`, `${pts(x.raw)} pts`, x.raw >= 0 ? "up" : "down"] : null).filter(Boolean);
   const ch = changeNote(it.id);
   const patchRows = ch ? [[ch.long, null]] : [];
-  for (const sec of [factList("Recent game update", patchRows), factList("Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList("From the live match", live), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
+  for (const sec of [factList("Recent game update", patchRows), factList("Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList(S.view?.match?.live === false ? "From this match" : "From the live match", live), factList("Enemy abilities (for information: the statistics already allow for them)", kitInfo), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
   if (!s.base && kind !== "owned" && kind !== "search") { const p = document.createElement("p"); p.className = "muted small"; p.textContent = "Not enough games to rate this item by itself."; box.append(p); }
   const text = itemText(it);
   if (text) {
@@ -4940,7 +5151,7 @@ function renderResultsInner() {
   for (const id of S.owned) bought[id] = S.boughtInfo[id] || { sec: S.boughtAt?.[id] ?? null, rate: null };
   const { order, groups, scoredById, match, ownedRates, ownedInfo, purchaseValues } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
     prog: S.prog, owned: S.owned, souls, lane: S.lane, threatW, fed, fl, sec, curve: S.curve, slotCap: slotsNow.cap, skipped, prevOrder: S.prevOrder,
-    roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me), bought });
+    roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me), bought, ...kitsNow() });
   if (!prelim) { S.lastPV = purchaseValues; S.lastOwned = new Set(S.owned); }
 
   // Possible unmarked purchases (see checkSoulsDrop); drop the ones that are owned or were just sold.
@@ -5013,12 +5224,14 @@ function renderBoard() {
   if (match) {
     const n = match.needs;
     for (const k of ["antiheal", "cleanse", "bulletRes", "spiritRes", "bulletShred", "spiritShred"]) if (n[k] && n[k].strength >= 0.3) mr.push(n[k].why);
+    // The enemies' abilities (v2.10), when well above or below an average team.
+    for (const k of ["kit:cc", "kit:sustain", "kit:slow"]) if (n[k] && Math.abs(n[k].strength) >= 0.3) mr.push(n[k].why.replace(/^the enemies' abilities: /, "enemy abilities: ").replace(/^the enemies' abilities bring/, "enemy abilities bring"));
     const ahead = [...match.fed].filter(([, f]) => f.rel >= 1.25).sort((a, b) => b[1].rel - a[1].rel).slice(0, 2);
     if (ahead.length) mr.push(ahead.map(([e, f]) => `${heroName(e)} is ${Math.round((f.rel - 1) * 100)}% above the match average`).join(", "));
-    if (!mr.length) mr.push(`${match.enemyItemCount} enemy items read, nothing that needs a special answer yet`);
+    if (!mr.length) mr.push(match.live ? `${match.enemyItemCount} enemy items read, nothing that needs a special answer yet` : "the enemy heroes' abilities are about average: nothing that needs a special answer");
   }
   $("matchRead").hidden = !match;
-  $("matchRead").textContent = match ? "Live match: " + mr.join(" · ") : "";
+  $("matchRead").textContent = match ? (match.live ? "Live match: " : "This match: ") + mr.join(" · ") : "";
   // Lane opponents, in full, with where they came from.
   const laneIds = S.enemies.filter(e => S.lane.has(e));
   $("laneRead").hidden = !laneIds.length;
