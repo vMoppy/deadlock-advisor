@@ -10,10 +10,10 @@
   /* Layout: setup screen before the match; during the match a one-screen board of modules:
      buy order | other recommendations (tabs) | item details, with your build under the buy order. */
   :root {
-    --bg: #f2efe9; --panel: #fbf9f5; --fg: #1f1c18; --muted: #6d665c; --line: #dcd4c7;
+    --bg: #f2efe9; --panel: #fbf9f5; --fg: #1f1c18; --muted: #625b51; --line: #dcd4c7;
     --accent: #8a5a12; --accent-soft: #f0e2c6;
     --weapon: #b8661a; --spirit: #7a4fb8; --vitality: #3d8a4a;
-    --good: #2f7d4f; --warn: #a3661a; --bad: #b3372b;
+    --good: #276b43; --warn: #8a5413; --bad: #b3372b;   /* v3.0: text contrast at least 4.5:1 on every background */
     --display: "Barlow Condensed", "Arial Narrow", sans-serif;
     --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
     color-scheme: light;
@@ -190,7 +190,7 @@
   .row img { width: 26px; height: 26px; }
   .ord { font: 700 16px/1 var(--display); color: var(--accent); min-width: 12px; text-align: center; }
   .ord:empty { min-width: 0; }
-  .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .name { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .reason { display: block; font-size: 12px; color: var(--muted); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cost { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .cost b { display: block; font-size: 13.5px; }
@@ -269,6 +269,45 @@
     background: var(--fg); color: var(--bg); border-radius: 8px; padding: 8px 10px 8px 14px; display: flex; gap: 12px; align-items: center;
     font-size: 14px; max-width: calc(100% - 32px); box-shadow: 0 4px 16px rgba(0,0,0,.25); }
   #toast button { background: transparent; border: 1px solid var(--bg); color: var(--bg); border-radius: 6px; padding: 3px 10px; font: 600 13px var(--body); cursor: pointer; }
+  /* Match view (v3.0): one calm panel for use during a match, readable on a phone or a second monitor. */
+  #matchView { display: none; }
+  #board.compact { height: auto !important; min-height: 0 !important; grid-template-columns: minmax(0, 1fr) !important; grid-template-areas: none !important; grid-template-rows: auto !important; max-width: 780px; width: 100%; margin: 0 auto; }
+  #board.compact > .mod { display: none; }
+  #board.compact > #matchView { display: grid; gap: 16px; align-content: start; height: auto; max-height: none; overflow: visible; }
+  .mv-alert { font: 700 19px/1.3 var(--body); padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); border-left: 6px solid var(--accent); }
+  .mv-alert[data-kind="dead"], .mv-alert[data-kind="sell"] { border-left-color: var(--bad); }
+  .mv-alert[data-kind="afford"], .mv-alert[data-kind="egg"] { border-left-color: var(--good); }
+  .mv-next { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 6px 14px; align-items: center; padding: 12px 14px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--accent); }
+  .mv-next.weapon { border-left-color: var(--weapon); } .mv-next.spirit { border-left-color: var(--spirit); } .mv-next.vitality { border-left-color: var(--vitality); }
+  .mv-next > img { width: 64px; height: 64px; border-radius: 8px; }
+  .mv-eyebrow { font: 700 14px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .mv-name { font: 700 clamp(28px, 6.5vw, 44px)/1.05 var(--display); overflow-wrap: anywhere; }
+  .mv-cost { font-size: 19px; font-weight: 600; margin-top: 2px; }
+  .mv-cost .need { color: var(--warn); } .mv-cost .can { color: var(--good); }
+  .mv-bar { grid-column: 1 / -1; height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+  .mv-bar > span { display: block; height: 100%; background: var(--good); }
+  .mv-actions { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+  .mv-actions button, .mv-actions .btn { font: 600 17px/1.2 var(--body); padding: 10px 16px; min-height: 44px; min-width: 44px; white-space: nowrap; border-radius: 8px; width: auto; height: auto; }
+  .mv-why { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 17px; line-height: 1.35; align-content: start; }
+  .mv-why dt { font-weight: 700; color: var(--muted); } .mv-why dd { margin: 0; }
+  @media (max-width: 480px) { .mv-why { grid-template-columns: minmax(0, 1fr); gap: 2px; } .mv-why dd { margin-bottom: 6px; } }
+  .mv-then-h { font: 700 14px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .mv-then { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 17px; }
+  .mv-then li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+  .mv-then .sub { grid-column: 1 / -1; font-size: 14px; color: var(--muted); display: block; padding: 0; border: 0; }
+  .mv-detail { border-top: 1px solid var(--line); padding-top: 12px; }
+  /* Three-part explanation (v3.0): why this item, why now, what you'd give up. */
+  .three { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; margin: 8px 0 4px; }
+  .three dt { font-weight: 700; } .three dd { margin: 0; }
+  @media (max-width: 480px) { .three { grid-template-columns: minmax(0, 1fr); gap: 1px; } .three dd { margin-bottom: 5px; } }
+  /* Phone widths (v3.0): a dropdown is as wide as its longest option, which pushed the setup card past a 360 px screen. */
+  select { max-width: 100%; min-width: 0; }
+  .card, .card > *, .sub > *, .rowflex > * { min-width: 0; }
+  .gloss dt { font-weight: 700; margin-top: 8px; } .gloss dd { margin: 2px 0 0; }
+  /* First visit (v3.0): three steps for a friend opening the shared copy. */
+  .welcome { border-color: var(--accent); }
+  @media (min-width: 980px) { #welcome { grid-column: 1 / -1; } }
+  .welcome-steps { margin: 6px 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -295,16 +334,28 @@
       <button id="clockPlus" class="btn tiny" type="button" title="The clock is behind your game: move it forward 1 minute" hidden>+1 min</button>
       <button id="clockStop" class="btn tiny" type="button" title="Stop the clock and pick the stage by hand" hidden>Stop</button>
     </span>
+    <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Match view: just the next buy and what matters now, in large type. Full view: everything.">Match view</button>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v2.10</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.0</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="reviewOpen" class="linkbtn small" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
+    <button id="glossOpen" class="linkbtn small" type="button">Glossary</button>
     <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
     <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
   </div>
 
   <div id="setup">
+    <section class="card welcome" id="welcome" aria-labelledby="welcomeTitle" hidden>
+      <div class="card-head"><h2 id="welcomeTitle">Welcome</h2><button id="welcomeClose" class="btn tiny" type="button">Got it</button></div>
+      <p class="small">This tool suggests what to buy next in Deadlock, and explains why. Three steps to set it up:</p>
+      <ol class="welcome-steps">
+        <li><b>Save your Steam account</b> (below): paste your Steam profile link or type your name. It lets the tool find your matches and know which player is you. It stays in this browser.</li>
+        <li><b>Leave "Statistics from" on Automatic</b>: it uses games at your rank, or your lobby's once a match is linked.</li>
+        <li><b>In a match, press Find my match</b> (or type the match ID from the bottom-right of your game screen). Everything then fills in by itself. Keep this page open on a second screen or your phone: Match view shows the next buy in large type.</li>
+      </ol>
+      <p class="muted small">Nothing to install, no account to make. Other players' names and accounts are never kept.</p>
+    </section>
     <section class="card" id="liveSetup" aria-labelledby="liveTitle">
       <div class="card-head"><h2 id="liveTitle">Live match</h2><span class="tag good">Automatic</span></div>
       <p class="muted small">Fills in your hero, both teams, your lane, everyone's items and your souls, then keeps them updated while you play.</p>
@@ -431,6 +482,13 @@
   </div>
 
   <div id="board" hidden>
+    <section class="mod" id="matchView" aria-label="Match view">
+      <div id="mvAlert" class="mv-alert" role="status" aria-live="polite" hidden></div>
+      <div id="mvNext"></div>
+      <dl id="mvWhy" class="mv-why"></dl>
+      <div id="mvThenWrap"><div class="mv-then-h">Then</div><ol id="mvThen" class="mv-then"></ol></div>
+      <div id="mvDetail" class="mv-detail" hidden></div>
+    </section>
     <section class="mod" id="modOrder">
       <div class="mod-head"><h2>Buy order</h2><span class="small" id="orderPrelim" hidden></span><span class="muted small" id="orderNote"></span><span class="muted small" id="orderAge"></span></div>
       <div class="readout">
@@ -468,6 +526,12 @@
   <div class="sheet notes" role="dialog" aria-labelledby="notesTitle">
     <div class="mod-head"><h2 id="notesTitle">What's new</h2><button id="notesClose" class="btn" type="button">Close</button></div>
     <div id="notesBody" class="scroll"></div>
+  </div>
+</div>
+<div id="glossOverlay" class="overlay" hidden>
+  <div class="sheet notes" role="dialog" aria-modal="true" aria-labelledby="glossTitle">
+    <div class="mod-head"><h2 id="glossTitle">Glossary</h2><button id="glossClose" class="btn" type="button">Close</button></div>
+    <dl id="glossBody" class="gloss scroll"></dl>
   </div>
 </div>
 <div id="reviewOverlay" class="overlay" hidden>
@@ -521,10 +585,15 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v2.10";   // shown in the top bar and written into match records
+const VERSION = "v3.0";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.0", date: "October 15, 2026", items: [
+    "New: Match view (button in the top bar; the default on phones). The next buy in large type, the souls still needed, one alert at a time, and the next few steps. Details are one tap away; Full view brings the board back.",
+    "Alerts that come and go by themselves: you're dead so shop now, you can afford the next buy, slots full so sell first, hatch the Egg, souls held unspent for 2 minutes.",
+    "Every recommendation is explained the same way: why this item, why now, and what you'd give up. A Glossary (top bar) explains the terms.",
+    "Works properly on a phone (no sideways scrolling), clearer colours, and a short welcome for friends opening the tool for the first time."] },
   { v: "v2.10", date: "October 15, 2026", items: [
     "The tool reads every hero's abilities. Item details name the enemy ability an item answers (\"Abrams: Seismic Impact (stun)\"), and the match summary says when the enemy team has unusually much crowd control, healing or slows, even without a live link. Information only: real matches showed the statistics already allow for enemy abilities.",
     "Your own abilities and your teammates' count: as Venator, your grenade's healing reduction already covers part of the need for a healing reduction item.",
@@ -3164,7 +3233,7 @@ function tickClock() {
     $("clockTime").textContent = `${Math.floor(sec / 60)}:${String(Math.floor(sec) % 60).padStart(2, "0")}`;
     setPhase(phaseForSeconds(sec));
   } else $("clockTime").textContent = "--:--";
-  if (LIVE.meAlive === false) renderDead();
+  if (LIVE.meAlive === false) { renderDead(); renderMatchView(); }
   const plan = currentPlan();
   $("stageTag").textContent = plan.length > 1
     ? `${PHASE_NAMES[plan[0].phase]} → ${PHASE_NAMES[plan[1].phase]}`
@@ -3425,6 +3494,8 @@ function findLiveColumns(tables) {
     evCurrency: evTable(/^CurrencyChangedEvent$/, ["tick", "userid", "currency_type", "delta", "new_value"]),
     // The game's own "game over" message (v2.8.3): the only reliable sign that a match has ended (see matchEnded).
     evGameOver: evTable(/^GameOverEvent$/, ["tick", "winning_team"]),
+    // The game's death summary (v3.0, recorded only): one per death, with who and what dealt the damage.
+    evDeath: evTable(/^DeathReplayDataEvent$/, ["tick", "damage_summary"]),
     evGameOverTest: !!evTable(/^GameOverEvent$/, ["tick", "winning_team", "just_a_test"]),
     v: 10
   };
@@ -3533,7 +3604,7 @@ function onMyAlive(alive, tick, respawn) {
   if (alive && open) { open.end = Math.max(open.at, Math.round(gt ?? open.at)); logEvent("respawn", { t: open.end }); }
   if (LIVE.deathSamples == null) LIVE.deathSamples = [];
   if (LIVE.deathSamples.length < 12) LIVE.deathSamples.push([alive ? 1 : 0, tick ?? null, respawn ?? null, gt != null ? Math.round(gt) : null]);   // to check the respawn time's units
-  saveMatch(); renderDead(); renderEgg();
+  saveMatch(); renderDead(); renderEgg(); renderMatchView();   // the match view's alert follows (v3.0)
 }
 /* While you're dead: respawning is a good moment to shop. */
 function renderDead() {
@@ -3598,6 +3669,7 @@ function renderSteam() {
 function saveSteam(profile) {
   S.steam = { accountId: Number(profile.account_id ?? profile.accountId), name: profile.personaname || profile.name || "" };
   store.set("steam", S.steam);
+  if ($("welcome")) $("welcome").hidden = true;   // step 1 of the welcome done (v3.0)
   LIVE.steamPick = false; S.steamVanity = null;
   $("steamResults").replaceChildren(); $("steamInput").value = "";
   renderSteam();
@@ -3879,7 +3951,7 @@ async function linkSteps(id, opts) {
 function unlinkMatch(quiet) {
   linkSeq++;   // any link still starting is now stale
   for (const k in LIVE.streams) LIVE.streams[k].stop();
-  Object.assign(LIVE, { streams: {}, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
+  Object.assign(LIVE, { streams: {}, deathReplay: null, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
     itemsOk: false, itemsChecked: false, idSeen: 0, idKnown: 0, idSamples: [], knownSet: null, rawItemSample: "", rawSoulsSample: "", soulsRows: 0, invSig: "", souls: null, nw: null, meHow: null,
     laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
     connecting: false, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
@@ -3914,6 +3986,22 @@ function startGameOverStream() {
     if (r.test === true || r.test === 1 || r.test === "true") return;   // the game's own test message, not a real end
     LIVE.gameOver = { tick: r.tick != null ? Number(r.tick) : null, winner: r.winner ?? null };
     matchEnded("confirmed");
+  });
+}
+/* The death summary (v3.0, an investigation): its shape and size are kept in the match record, so a later version can decide
+   whether to use "what's actually hurting you" (gun or spirit damage, and from whom) for resist advice. Only while recording;
+   the first three summaries are kept (other players' accounts are never part of them: the columns are entity numbers and
+   damage), then the stream stops. Nothing in the advice uses it yet. */
+const DEATH_SAMPLES = 3;
+function startDeathStream() {
+  const c = LIVE.cols;
+  if (LIVE.streams.death || !LIVE.url || !c?.evDeath || !LIVE.applied || !LOG.on || (LIVE.deathReplay?.samples.length >= DEATH_SAMPLES)) return;
+  LIVE.deathReplay ||= { rows: 0, bytes: 0, samples: [], columns: ["tick", "killer_scorer", "killer_inflictor", "damage_summary"] };
+  LIVE.streams.death = liveStream("death", `SELECT * FROM ${qtable(c.evDeath)}`, r => {
+    const D = LIVE.deathReplay, txt = JSON.stringify(r);
+    D.rows++; D.bytes += txt.length;
+    if (D.samples.length < DEATH_SAMPLES) D.samples.push(txt.slice(0, 4000));
+    if (D.samples.length >= DEATH_SAMPLES) { LIVE.streams.death?.stop(); delete LIVE.streams.death; }
   });
 }
 function startRulesStream() {
@@ -4315,7 +4403,7 @@ function applyRoster() {
     LIVE.applied = true; S.lastMatchId = LIVE.id; saveMatch(); tlMark("teams set up");
     if (!S.active && S.enemies.length) recommend();
   }
-  startSoulsStream(); startRulesStream(); startTeamStream(); startGameOverStream();
+  startSoulsStream(); startRulesStream(); startTeamStream(); startGameOverStream(); startDeathStream();
   if (!LIVE.lobby || LIVE.lobby.matchId !== LIVE.id) { if (!LIVE.lobbyRetryAt || Date.now() > LIVE.lobbyRetryAt) fetchLobbyRank(); }
   if (S.active && (invChanged || teamChanged || laneChanged)) renderResults();
   // One message per stage (teams from the Watch list, then fully live), never repeated or written over
@@ -4428,6 +4516,7 @@ function logDiag() {
     d.thin = LIVE.thin ?? null; d.thinRejected = LIVE.thinRejected || null; d.deathSamples = LIVE.deathSamples || null; d.deaths = (S.deaths || []).slice(0, 40);
     d.replayedRowsIgnored = LIVE.replayedRows || 0;
     if (LIVE.swapped?.length || LIVE.leftovers?.length) d.heroChanges = { swapped: LIVE.swapped || [], leftovers: LIVE.leftovers || [] };   // v2.8.5
+    d.deathReplay = LIVE.deathReplay || (LIVE.cols ? { table: !!LIVE.cols.evDeath } : null);   // v3.0 investigation
     d.matchEnd = { how: LIVE.endHow || null, endsWithoutGameOver: LIVE.endChecks || 0, gameOver: LIVE.gameOver || null, gameOverStream: !!LIVE.cols?.evGameOver };   // v2.8.3
     d.spectateFails = LIVE.spectateFails?.length ? LIVE.spectateFails.map(f => ({ status: f.status, reason: f.reason, auto: f.auto })) : null;
     d.heroesFromMatch = S.heroesAdded?.length ? S.heroesAdded : null;   // heroes the game data didn't list yet (v2.8.1)
@@ -4815,6 +4904,7 @@ function skipButton(it, entry, label = "✕") {
 function buyButton(it, cost, label = "✓ Bought") {
   const b = document.createElement("button"); b.type = "button"; b.className = "buy";
   b.textContent = label; b.title = `Mark ${it.name} as bought (−${cost.toLocaleString()} souls)`;
+  b.setAttribute("aria-label", `Mark ${it.name} as bought`);
   b.onclick = e => { e.stopPropagation(); markBought(it, cost); };
   return b;
 }
@@ -4954,8 +5044,145 @@ function factList(title, rows) {
   sec.append(h, ul);
   return sec;
 }
-function renderDetail(entry, souls, labelText) {
-  const box = $("detail"); box.replaceChildren();
+/* ---------- v3.0: the three-part explanation, the one current alert, and the match view ---------- */
+/* Every recommendation explained the same way: why this item (what it answers, which enemy or ability), why now (souls,
+   timing, the plan's reason), and what you'd give up (a sale, or the best other item at about the same price). short: one
+   line each for the match view; long: for details. */
+function threeParts(entry, souls, view = S.view) {
+  const { s, kind } = entry, it = s.item;
+  const total = entry.cumulative ?? s.cost, need = Math.max(0, total - souls);
+  // Why this item.
+  // The plan's step ("Upgrade Mystic Vulnerability") says what; the reason says why.
+  const whyShort = [entry.why ? entry.why.replace(/\s*\([^)]*\)\s*$/, "") : "", shortReason(s, kind, null)].filter(Boolean).join(" · ");
+  const helps = (s.vs || []).filter(v => v.lift > 0 && v.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 2).map(v => `${pts(v.lift)} pts against ${heroName(v.enemyId)}`);
+  const whyLong = [verdictFor(s, kind), ...(s.mechWhy || []).slice(0, 2).map(w => w + "."), helps.length ? `Statistics: ${helps.join(", ")}.` : "",
+    (s.mechInfo || [])[0] ? `Enemy abilities: ${s.mechInfo[0]} (for information).` : ""].filter(Boolean).join(" ");
+  // Why now.
+  const sec = gameSecondsNow() ?? planSeconds();
+  const rate = incomeRate(S.curve, sec), mins = need ? Math.max(1, Math.round(need / Math.max(1, rate) / 60)) : 0;
+  const nowShort = need ? `${need.toLocaleString()} more souls (about ${mins} min)` : "You can buy it now";
+  const nowLong = [need ? `You need ${need.toLocaleString()} more souls${total !== s.cost ? " to reach this step" : ""}, about ${mins} minute${mins === 1 ? "" : "s"} at a usual income.` : "You can buy it now.",
+    entry.sell ? "" : entry.plan || "", s.timing?.note ? s.timing.note.replace(/\.?$/, ".") : ""].filter(Boolean).join(" ");   // a sale is explained under "give up"
+  // What you'd give up.
+  let giveShort, giveLong;
+  if (entry.sell) {
+    const sold = entry.sell.item?.name || "an item";
+    giveShort = `Sell ${sold} (you get back ${entry.sell.refund.toLocaleString()})`;
+    giveLong = `Your slots are full, so this means selling ${sold}: you get back ${entry.sell.refund.toLocaleString()} souls, half its price, and lose what it gives you. It's worth clearly less to you now than ${it.name}.`;
+  } else {
+    // The best other item at about this price that the plan doesn't buy first.
+    const planned = new Set((view?.order || []).slice(0, 1).map(x => x.s.item.id));
+    const pool = ["counters", "build", "core", "situational"].flatMap(k => view?.groups?.[k] || []);
+    const alt = pool.filter(x => x.item.id !== it.id && !planned.has(x.item.id) && !S.owned.has(x.item.id) && x.cost > 0 && x.cost <= s.cost * 1.25 && x.cost >= s.cost * 0.5)
+      .sort((a, b) => itemValue(b) - itemValue(a))[0];
+    if (alt) {
+      const d = itemValue(s) - itemValue(alt);
+      const size = x => (Math.abs(x) * 100).toFixed(1);
+      giveShort = `Instead of ${alt.item.name}` + (Math.abs(d) >= 0.002 ? ` (${size(d)} pts ${d > 0 ? "less" : "more"} on paper)` : " (about as good)");
+      giveLong = `The best other choice at about this price is ${alt.item.name} (${alt.cost.toLocaleString()} souls)` + (d >= 0.002 ? `: worth about ${size(d)} pts less to you now.` : d <= -0.002 ? `: worth ${size(d)} pts more on its own, but ${it.name} fits the plan better (sooner, or a step toward an upgrade).` : `: about as good, so either is fine.`);
+    } else { giveShort = "Nothing close at this price"; giveLong = "No other recommended item at about this price comes close."; }
+  }
+  return { why: [whyShort, whyLong], now: [nowShort, nowLong], give: [giveShort, giveLong] };
+}
+function threeList(tp, long, cls = "three") {
+  const dl = document.createElement("dl"); dl.className = cls;
+  for (const [label, [sh, lg]] of [["Why this item", tp.why], ["Why now", tp.now], ["What you'd give up", tp.give]]) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = long ? lg : sh;
+    dl.append(dt, dd);
+  }
+  return dl;
+}
+/* The one alert that matters now, or null: dead (shop now), the Egg ready to hatch, slots full for an affordable buy, the
+   next buy affordable, souls held unspent for 2 minutes. Worked out from the current state each time, so an alert clears by
+   itself once it's acted on (bought, hatched, back alive). */
+const FLOAT_ALERT_MS = 120000;
+function currentAlert(souls = soulsNow(), view = S.view) {
+  const next = view?.order?.[0];
+  const total = next ? (next.cumulative ?? next.s.cost) : Infinity, afford = total <= souls;
+  const dead = !!LIVE.id && LIVE.meAlive === false;
+  const name = next?.s.item.name;
+  if (dead) {
+    const left = LIVE.respawnIn ? Math.max(0, Math.round(LIVE.respawnIn.s - (Date.now() - LIVE.respawnIn.at) / 1000)) : null;
+    S.floatSince = null;
+    return { kind: "dead", text: `You're dead${left ? ` (back in about ${left} s)` : ""}: shop now.` + (next ? (afford ? ` Buy ${name}${next.sell ? `, selling ${next.sell.item?.name || "an item"}` : ""}.` : ` Next: ${name}, ${(total - souls).toLocaleString()} more souls.`) : "") };
+  }
+  const egg = $("eggNote");
+  if (egg && !egg.hidden && egg.dataset.action === "hatch") return { kind: "egg", text: egg.textContent };
+  if (next && afford && next.sell) { S.floatSince = null; return { kind: "sell", text: `Slots full: sell ${next.sell.item?.name || "an item"} (you get back ${next.sell.refund.toLocaleString()}), then buy ${name}.` }; }
+  // Souls held while the next buy is affordable: an alert after 2 minutes (in game, being away from the shop is normal).
+  const holding = next && afford && souls >= Math.max(FLOAT_SOULS, total);
+  if (holding) { S.floatSince ||= Date.now(); if (Date.now() - S.floatSince >= FLOAT_ALERT_MS) return { kind: "float", text: `You've held ${souls.toLocaleString()} souls for over 2 minutes: souls only help once spent. Next buy: ${name}.` }; }
+  else S.floatSince = null;
+  if (next && afford) return { kind: "afford", text: `You can buy ${name} now.` };
+  return null;
+}
+/* The match view (v3.0): the next buy in large type, souls still needed, the one current alert, why (three parts), the next
+   few steps, and the full details one tap away. Shown instead of the board when chosen (remembered; the default on narrow
+   screens). */
+function renderMatchView() {
+  const on = !!S.compact && !!S.active;
+  $("board").classList.toggle("compact", on);
+  const tg = $("viewToggle"); tg.hidden = !S.active; tg.textContent = on ? "Full view" : "Match view"; tg.setAttribute("aria-pressed", String(on));
+  if (!on || !S.view) return;
+  const souls = soulsNow(), order = S.view.order || [], next = order[0];
+  const al = currentAlert(souls), box = $("mvAlert");
+  box.hidden = !al; box.textContent = al ? al.text : ""; box.dataset.kind = al ? al.kind : "";
+  const nx = $("mvNext"); nx.replaceChildren();
+  if (!next) { nx.className = ""; nx.innerHTML = `<p class="muted">No buy order yet. ${S.view.empty ? "No games found for these settings." : "Waiting for statistics…"}</p>`; $("mvWhy").replaceChildren(); $("mvThenWrap").hidden = true; return; }
+  const it = next.s.item, total = next.cumulative ?? next.s.cost, need = Math.max(0, total - souls);
+  nx.className = "mv-next " + it.item_slot_type;
+  const mid = document.createElement("div"); mid.style.minWidth = "0";
+  mid.innerHTML = `<div class="mv-eyebrow">Buy next${next.sell ? " · slots full" : ""}</div><div class="mv-name"></div><div class="mv-cost"><span class="price"></span> · <span class="${need ? "need" : "can"}"></span></div>`;
+  mid.querySelector(".mv-name").textContent = it.name;
+  mid.querySelector(".price").textContent = `${next.s.cost.toLocaleString()} souls`;
+  mid.querySelector(need ? ".need" : ".can").textContent = need ? `${need.toLocaleString()} more needed` : "you can buy it now";
+  const bar = document.createElement("div"); bar.className = "mv-bar"; bar.setAttribute("role", "progressbar"); bar.setAttribute("aria-label", "Souls toward the next buy");
+  bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", String(total)); bar.setAttribute("aria-valuenow", String(Math.min(souls, total)));
+  const fill = document.createElement("span"); fill.style.width = `${Math.round(100 * Math.min(1, souls / Math.max(1, total)))}%`; bar.append(fill);
+  const acts = document.createElement("div"); acts.className = "mv-actions";
+  const bought = buyButton(it, next.s.cost, `✓ Bought ${it.name}`); bought.classList.add("main");
+  const det = document.createElement("button"); det.type = "button"; det.className = "btn"; det.id = "mvDetails";
+  const open = !$("mvDetail").hidden;
+  det.textContent = open ? "Hide details" : "Details"; det.setAttribute("aria-expanded", String(open));
+  det.onclick = () => { $("mvDetail").hidden = !$("mvDetail").hidden; renderMatchView(); };
+  acts.append(bought, det, skipButton(it, next, "Not for me"));
+  nx.append(img(itemIcon(it)), mid, bar, acts);
+  // Why, now, give up: one line each.
+  const tp = threeParts(next, souls);
+  const why = $("mvWhy"); why.replaceChildren(...threeList(tp, false, "mv-why").childNodes);
+  // The next few steps.
+  const then = $("mvThen"); then.replaceChildren();
+  for (const st of order.slice(1, 4)) {
+    const li = document.createElement("li"), tot = st.cumulative ?? st.s.cost;
+    li.innerHTML = `<span class="nm"></span><span class="c"></span>`;
+    li.querySelector(".nm").textContent = st.s.item.name;
+    li.querySelector(".c").textContent = `${st.s.cost.toLocaleString()}` + (tot > souls ? ` · ${(tot - souls).toLocaleString()} more` : "");
+    if (st.sell) { const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = `${st.sell.later ? "If slots are still full: sell" : "Sell"} ${st.sell.item?.name || "an item"}`; li.append(sub); }
+    then.append(li);
+  }
+  $("mvThenWrap").hidden = order.length < 2;
+  if (!$("mvDetail").hidden) renderDetail(next, souls, S.view.label, $("mvDetail"));
+}
+/* Glossary (v3.0): the terms the explanations use. */
+const GLOSSARY = [
+  ["Points (pts)", "Win-rate points: +1 pt means players who did this won about 1% more of their games. Small numbers are normal: most items differ by a few points."],
+  ["Adjusted win rate", "The win rate of an item's buyers, re-weighted so players who were ahead and players who were behind count as they do overall. Plain win rates make expensive items look better than they are, because players who are already winning buy them sooner."],
+  ["Stage", "Laning (0 to 9 minutes), mid game (9 to 20) and late game (20 and on). An item's value is measured for the stage you'd buy it in."],
+  ["Counter", "An item that does better than usual against a particular enemy hero, after allowing for how your hero does against that enemy in general."],
+  ["Build fit", "How an item does alongside the items you already own. On real matches it predicted little, so it counts only a tenth."],
+  ["Parts and upgrades", "Many items build from cheaper ones. Buying the part first is progress: you pay only the difference later, and the part goes into the upgrade."],
+  ["Slots", "9 item slots, plus up to 3 more as your team destroys enemy Walkers. At most 4 active items. With full slots, buying something new means selling something (for half its price)."],
+  ["What the match needs", "Answers to what the enemies have built, from the live match: healing reduction against healing items, ways out of crowd control, resist against the damage they build."],
+  ["Enemy abilities", "What the enemy heroes' abilities do (stuns, healing, slows), read from the game data. Shown for information: the statistics already allow for them."],
+  ["Advice edge", "How much more often players who bought from the tool's top suggestions won than their team's lead at that moment predicted, measured on thousands of real matches."]
+];
+function renderGlossary() {
+  const dl = $("glossBody"); dl.replaceChildren();
+  for (const [t, d] of GLOSSARY) { const dt = document.createElement("dt"); dt.textContent = t; const dd = document.createElement("dd"); dd.textContent = d; dl.append(dt, dd); }
+}
+function renderDetail(entry, souls, labelText, box = $("detail")) {
+  box.replaceChildren();
   if (!entry) { box.innerHTML = `<p class="muted">Tap any item to see why it's recommended.</p>`; return; }
   const { s, kind } = entry;
   const it = s.item;
@@ -4975,7 +5202,11 @@ function renderDetail(entry, souls, labelText) {
   t.append(nm, tags);
   head.append(img(itemIcon(it)), t);
   box.append(head);
-  const v = document.createElement("p"); v.className = "verdict"; v.textContent = verdictFor(s, kind); box.append(v);
+  // The three-part explanation (v3.0) for anything in the plan or the lists (it starts with the verdict); the facts below are
+  // the evidence. Owned items and items found by search keep the verdict alone.
+  const three = kind !== "owned" && kind !== "search" && !!s.base;
+  if (three) box.append(threeList(threeParts(entry, souls), true));
+  else { const v = document.createElement("p"); v.className = "verdict"; v.textContent = verdictFor(s, kind); box.append(v); }
   if (skippedNow().has(it.id) && !S.owned.has(it.id)) {
     const always = ((store.get("skipAlways") || {})[S.me] || []).includes(it.id);
     const p = document.createElement("p"); p.className = "small warn-text";
@@ -4984,7 +5215,7 @@ function renderDetail(entry, souls, labelText) {
     b.onclick = () => always ? setAlwaysSkip(it.id, false) : unskipItem(it.id);
     p.append(b); box.append(p);
   }
-  const w = whenFor(s, souls, entry);
+  const w = three ? "" : whenFor(s, souls, entry);
   if (w) { const p = document.createElement("p"); p.className = "when " + ((entry.cumulative ?? s.cost) <= souls ? "afford" : "need"); p.textContent = w; box.append(p); }
   // Short reasons
   const tough = id => (S.view?.threat?.get(id)?.weight || 1) > 1.05;
@@ -5007,8 +5238,8 @@ function renderDetail(entry, souls, labelText) {
   const std = (kind === "core" || kind === "part") && s.base ? [[`Win rate when bought now (${s.base.players.toLocaleString()} players)`, pct(s.pb)]] : [];
   // Why now: the plan's reason for this step, and timing.
   const now = [];
-  if (entry.plan) now.push([entry.plan, null]);
-  if (s.timing?.note) now.push([s.timing.note, null]);
+  if (entry.plan && !three) now.push([entry.plan, null]);   // already in "Why now" above (v3.0)
+  if (s.timing?.note && !three) now.push([s.timing.note, null]);
   if (s.flow && s.adj && Math.abs(s.adj) >= 0.003) now.push([`Value for ${heroName(S.me)} at this stage, adjusted for how far ahead buyers were`, `${pts(s.adj)} pts`, s.adj > 0 ? "up" : "down"]);
   const k = flowCol(planSeconds());
   // Upgrade path: what this item builds from and into (from the game data), and what the plan intends.
@@ -5026,7 +5257,7 @@ function renderDetail(entry, souls, labelText) {
   const timeline = (s.flow?.cols || []).map((x, c) => x ? [`Bought at ${FLOW_COLS[c]}${c === k ? " (now)" : ""}: ${x.n.toLocaleString()} games`, `${pts(x.raw)} pts`, x.raw >= 0 ? "up" : "down"] : null).filter(Boolean);
   const ch = changeNote(it.id);
   const patchRows = ch ? [[ch.long, null]] : [];
-  for (const sec of [factList("Recent game update", patchRows), factList("Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList(S.view?.match?.live === false ? "From this match" : "From the live match", live), factList("Enemy abilities (for information: the statistics already allow for them)", kitInfo), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
+  for (const sec of [factList("Recent game update", patchRows), factList(three ? "Timing and value" : "Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList(S.view?.match?.live === false ? "From this match" : "From the live match", live), factList("Enemy abilities (for information: the statistics already allow for them)", kitInfo), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
   if (!s.base && kind !== "owned" && kind !== "search") { const p = document.createElement("p"); p.className = "muted small"; p.textContent = "Not enough games to rate this item by itself."; box.append(p); }
   const text = itemText(it);
   if (text) {
@@ -5216,6 +5447,8 @@ function renderOrderAge() {
   el.textContent = s < 5 ? "· updated just now" : s < 120 ? `· updated ${s} s ago` : `· updated ${Math.round(s / 60)} min ago`;
 }
 setInterval(renderOrderAge, 5000);
+// The match view's alert can change with time alone (souls held for 2 minutes, the respawn countdown): redrawn only when it does.
+setInterval(() => { if (!S.compact || !S.active || !S.view) return; const a = currentAlert(); if ((a?.text || "") !== ($("mvAlert").hidden ? "" : $("mvAlert").textContent)) renderMatchView(); }, 5000);
 function renderBoard() {
   if (!S.view) return;
   const { souls, order, groups, scoredById, label, threat, match, empty } = S.view;
@@ -5316,6 +5549,7 @@ function renderBoard() {
     else { sel = order[0]; S.selected = order[0]?.s.item.id ?? null; }
   }
   renderDetail(sel, souls, label);
+  renderMatchView();
 }
 
 /* Your build follows the match. Items you marked or removed in the last 4 minutes are held until the
@@ -5657,6 +5891,8 @@ async function init() {
       S.lastMatchId = m.lastMatchId || m.matchId || null; S.clockAdjust = m.clockAdjust || 0;
     }
     S.steam = store.get("steam"); S.watch = !!store.get("watch"); $("watchNext").checked = S.watch;
+    { const c = store.get("compact"); S.compact = typeof c === "boolean" ? c : (window.innerWidth || 1024) < 700; }   // match view (v3.0): the default on phones
+    $("welcome").hidden = !!(S.steam || store.get("welcomed"));   // first visit (v3.0)
     if (S.steam) { const c = store.get("myRank"); if (c && c.accountId === S.steam.accountId) S.myRank = c; fetchMyRank(); }
     renderRankNote();
     renderSteam(); renderSources();
@@ -5763,6 +5999,12 @@ $("reviewOverlay").onclick = e => { if (e.target === $("reviewOverlay")) $("revi
 $("reviewGo").onclick = () => runReview();
 $("reviewMatch").onkeydown = e => { if (e.key === "Enter") runReview(); };
 $("notesOpen").onclick = () => { renderNotes(); $("notesOverlay").hidden = false; $("notesClose").focus(); };
+$("welcomeClose").onclick = () => { $("welcome").hidden = true; store.set("welcomed", true); };
+$("glossOpen").onclick = () => { renderGlossary(); $("glossOverlay").hidden = false; $("glossClose").focus(); };
+$("glossClose").onclick = () => { $("glossOverlay").hidden = true; };
+$("glossOverlay").onclick = e => { if (e.target === $("glossOverlay")) $("glossOverlay").hidden = true; };
+// Match view or full view (v3.0), remembered.
+$("viewToggle").onclick = () => { S.compact = !S.compact; store.set("compact", S.compact); renderMatchView(); if (!S.compact) renderBoard(); };
 $("notesClose").onclick = () => { $("notesOverlay").hidden = true; };
 $("notesOverlay").onclick = e => { if (e.target === $("notesOverlay")) $("notesOverlay").hidden = true; };
 /* Feedback: written here, sent as a GitHub issue on the public repository (GitHub handles accounts and spam; the
@@ -5804,7 +6046,7 @@ $("fbCopy").onclick = async () => {
 };
 $("closePicker").onclick = () => { $("pickerOverlay").hidden = true; };
 $("pickerOverlay").onclick = e => { if (e.target === $("pickerOverlay")) $("pickerOverlay").hidden = true; };
-document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay", "reviewOverlay"].forEach(id => { $(id).hidden = true; }); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay", "reviewOverlay", "glossOverlay"].forEach(id => { $(id).hidden = true; }); });
 $("toastUndo").onclick = () => (toastUndo || undoBought)();
 $("toastMore").onclick = () => { const f = toastMore; toastMore = null; $("toast").hidden = true; if (f) f(); };
 $("clockStart").onclick = () => { S.clockStart = Date.now(); S.clockStartedOnce = true; S.soulOffset = 0; saveMatch(); tickClock(); loadCurve(); updateSouls(true); };
