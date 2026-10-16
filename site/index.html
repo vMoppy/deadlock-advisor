@@ -337,7 +337,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Match view: just the next buy and what matters now, in large type. Full view: everything.">Match view</button>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.0.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.0.2</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="reviewOpen" class="linkbtn small" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
     <button id="glossOpen" class="linkbtn small" type="button">Glossary</button>
@@ -586,10 +586,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.0.1";   // shown in the top bar and written into match records
+const VERSION = "v3.0.2";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.0.2", date: "October 15, 2026", items: [
+    "Fixed: an item bought mid-game could suddenly look weak at 20:00 and be suggested for a swap (Spirit Lifesteal for Bullet Lifesteal in a friend's Infernus match). Items you own are now judged by the players who bought them when you did, all the way through.",
+    "Fixed: the buy order never sells an item it suggests buying a step earlier."] },
   { v: "v3.0.1", date: "October 15, 2026", items: [
     "Upgrades show their tier on the buy order and in Match view (\"Upgrade to Tier 2\"). Their price is only the difference you pay, so a Tier 2 upgrade looked like an 800-soul Tier 1 item.",
     "Fixed: if you mark an item as bought but buy only its part in the game, the part now takes its place within about a minute (it took 4 minutes, and the souls estimate was too low meanwhile).",
@@ -719,6 +722,8 @@ const PAIR_FIT = { on: false, w: 0.5 };
    11% more often, while the purchase memory alone already removed almost all "sell what you just bought" moments (45 -> 5).
    Too big a change before v2.9's backtest can judge it. Replays and tests can switch it on. */
 const STAGE_AT_PURCHASE = { on: false };
+/* An owned item's counters from the stage it was bought in (v3.0.2, computePlan), as its stage value already is. */
+const OWN_CTR_AT_PURCHASE = { on: true };
 /* Calibration weights from the v2.9 backtest (roadmap, v2.9): how much each part of an item's value really predicts winning.
    Measured on 6,979 players in 7,000 real matches (8 heroes, two rank brackets, October 8 to 15) with statistics from the 30
    days before them, so no match was judged by numbers that included its own result: the chance of winning after buying an
@@ -1579,9 +1584,11 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
         // stats, so it needs a much bigger gain: the item sold has to be clearly doing little for you. So does selling
         // something you bought in the last RECENT_HOLD_S (v2.8.6): changing your mind that quickly needs a clear reason.
         const needFor = ([id, h]) => (it.cost || 0) >= 2 * (h.item?.cost || 0) && !(h.seq < 0 && (ownedInfo.get(id)?.recent?.ago ?? Infinity) <= RECENT_HOLD_S) ? SELL_GAIN : SELL_SIDEWAYS_GAIN;
-        // A later step (v2.8.7) only sells what you owned before, and never something bought in the last RECENT_HOLD_S (v2.9):
-        // it's a tentative step, not a clear reason to undo a purchase.
-        const pick = i <= 1 || late ? [...hold].filter(([id, h]) => !used.includes(id) && (i <= 1 || (h.seq < 0 && !((ownedInfo.get(id)?.recent?.ago ?? Infinity) <= RECENT_HOLD_S))) && (!activeNeed || h.item?.is_active_item) && (h.item?.cost || 0) <= (it.cost || 0))
+        // Only something you own now is sold, never an item bought earlier in the same plan (v3.0.2: buying it and then selling it
+        // a step later loses half its price; recorded once in a Seven match, "Spirit Shielding, then Superior Cooldown [sell Spirit
+        // Shielding]", and in a replay of a friend's Infernus match). A later step (v2.8.7) also never sells something bought in the
+        // last RECENT_HOLD_S (v2.9): it's a tentative step, not a clear reason to undo a purchase.
+        const pick = i <= 1 || late ? [...hold].filter(([id, h]) => !used.includes(id) && h.seq < 0 && (i <= 1 || !((ownedInfo.get(id)?.recent?.ago ?? Infinity) <= RECENT_HOLD_S)) && (!activeNeed || h.item?.is_active_item) && (h.item?.cost || 0) <= (it.cost || 0))
           .sort((a, b) => a[1].rate * needFor(a) - b[1].rate * needFor(b))[0] : null;
         const need = pick ? needFor(pick) : SELL_GAIN;
         /* A purchase from the last RECENT_HOLD_S is only sold for something clearly better per soul, not just bigger (v2.9): with
@@ -2311,7 +2318,7 @@ const tagsOf = it => { let t = TAG_CACHE.get(it.id); if (!t) { t = itemTags(it);
    souls, lane (Set of lane opponents), threatW (enemy weights), fed, fl (stage data or null), sec (game time),
    curve (net worth curve), slotCap, skipped (Set), prevOrder (the previous plan), roster (live players, or null),
    me (your hero), heroName (function). */
-function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, lane, threatW, fed, fl, sec, curve, slotCap, skipped, prevOrder, roster, me, heroName, abilities = [], bought = {}, kitOf = null, kitAvg = null }) {
+function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, lane, threatW, fed, fl, sec, curve, slotCap, skipped, prevOrder, roster, me, heroName, abilities = [], bought = {}, kitOf = null, kitAvg = null, stageAt = null }) {
   const wsum = ready.reduce((a, p) => a + p.w, 0);
   // Items already inside something you own (Sprint Boots inside Enduring Speed...) aren't recommended again.
   const covered = coveredBy(owned, prog || { parts: new Map() });
@@ -2383,9 +2390,31 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const needsNoOwn = match ? mechNeeds({ ...match.P, myHas: new Map(), myFrac: new Map() }, heroName) : null;
   // What each owned item counters in this team, from the same statistics that would recommend buying it. Without
   // this, an item bought as a counter could be suggested for sale a few minutes later (Spirit Shredder, Graves).
-  const ownCtr = new Map(mergeScored(ready.map((p, k) => ({ w: lists[k].w, scored: scoreItems({ baseline: p.entry.baseline,
-    perEnemy: p.entry.ready ? p.entry.perEnemy : [], items: ownedItems, owned: new Set(), souls, itemByClass,
+  const ctrOf = (list, stages) => new Map(mergeScored(stages.map(p => ({ w: p.w, scored: scoreItems({ baseline: p.entry.baseline,
+    perEnemy: p.entry.ready ? p.entry.perEnemy : [], items: list, owned: new Set(), souls, itemByClass,
     laneIds: lane, phase: p.phase, threat: threatW, all: p.all || p.entry.all || null }) }))).map(x => [x.item.id, x.score || 0]));
+  const ownCtr = ctrOf(ownedItems, ready.map((p, k) => ({ ...p, w: lists[k].w })));
+  /* v3.0.2: like its stage value (below), an item's counters are read from the stage you bought it in: the players who bought
+     it then, whose results cover the rest of their match. Up to v3.0.1 they came from the current stage, so at 20:00 an item
+     bought mid-game was judged by the players who buy it after 20:00, often a different, struggling group: in a recorded
+     Infernus match (October 15) Spirit Lifesteal, bought at 12:40 on the tool's advice, went from +0.3 points of counters to
+     -0.5 at 20:00, fell to half its stats' worth, and was suggested for a sideways swap to Bullet Lifesteal until 25:05.
+     Needs that stage's statistics (stageAt; the page has them once the match has passed through that stage); otherwise, or
+     with the purchase time unknown, the current stage as before. */
+  if (OWN_CTR_AT_PURCHASE.on && stageAt) {
+    const byPhase = new Map();
+    for (const it of ownedItems) {
+      const b = bought[it.id]; if (b?.sec == null) continue;
+      const ph = phaseForSeconds(b.sec);
+      if (ready.length === 1 && ready[0].phase === ph) continue;   // already the current stage
+      if (!byPhase.has(ph)) byPhase.set(ph, []); byPhase.get(ph).push(it);
+    }
+    for (const [ph, list] of byPhase) {
+      const sd = stageAt(ph);
+      if (!sd?.entry?.ready) continue;
+      for (const [id, v] of ctrOf(list, [{ phase: ph, w: 1, entry: sd.entry, all: sd.all || null }])) ownCtr.set(id, v);
+    }
+  }
   /* v2.8.6: an item is valued as owned the way it was valued as a purchase, so buying it doesn't make it look weak.
      - Stage value: the item's value at the stage you bought it (the statistics of players who bought it then, which cover the
        rest of their match). Up to v2.8.5 it was the average over all stages, so in a recorded Seven match Reactive Barrier was
@@ -2512,7 +2541,10 @@ function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abili
     const bought = {}; for (const id of owned) bought[id] = boughtInfo[id] || { sec: held.get(id), rate: null };
     const cap = slotCap ?? Math.max(BASE_SLOTS, maxHeld);
     const res = computePlan({ ready, items: G.items, itemById: G.itemById, itemByClass: G.itemByClass, prog: G.prog, owned, souls, lane: laneIds, threatW, fed,
-      fl: st.fl || null, sec: t, curve: st.curve || [], slotCap: cap, skipped: new Set(), prevOrder, roster, me: hero, heroName, abilities, bought, kitOf, kitAvg });
+      fl: st.fl || null, sec: t, curve: st.curve || [], slotCap: cap, skipped: new Set(), prevOrder, roster, me: hero, heroName, abilities, bought, kitOf, kitAvg,
+      stageAt: ph => { const s = st.stages[ph], a = st.all?.stages?.[ph]; if (!s) return null;
+        const pe = x => enemies.filter(e => x.perEnemy?.[e]).map(e => ({ enemyId: e, rows: x.perEnemy[e] }));
+        return { entry: { ready: true, baseline: s.baseline, perEnemy: pe(s) }, all: a ? { baseline: a.baseline, perEnemy: pe(a) } : null }; } });
     lastPV = res.purchaseValues; lastOwned = owned;
     prevOrder = res.order.map(x => ({ id: x.s.item.id, kind: x.kind, cost: x.s.cost }));
     onMoment({ t, owned, held, souls, nw, cap, alive: aliveAt(p, t), res });
@@ -5395,7 +5427,8 @@ function renderResultsInner() {
   for (const id of S.owned) bought[id] = S.boughtInfo[id] || { sec: S.boughtAt?.[id] ?? null, rate: null };
   const { order, groups, scoredById, match, ownedRates, ownedInfo, purchaseValues } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
     prog: S.prog, owned: S.owned, souls, lane: S.lane, threatW, fed, fl, sec, curve: S.curve, slotCap: slotsNow.cap, skipped, prevOrder: S.prevOrder,
-    roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me), bought, ...kitsNow() });
+    roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me), bought, ...kitsNow(),
+    stageAt: ph => { const e = S.cache[dataKey(ph)]; return e && e.ready ? { entry: e, all: allRanksNow(ph) } : null; } });   // statistics already loaded, never a new request
   if (!prelim) { S.lastPV = purchaseValues; S.lastOwned = new Set(S.owned); }
 
   // Possible unmarked purchases (see checkSoulsDrop); drop the ones that are owned or were just sold.
