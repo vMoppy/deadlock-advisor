@@ -303,7 +303,7 @@
   /* Phone widths (v3.0): a dropdown is as wide as its longest option, which pushed the setup card past a 360 px screen. */
   select { max-width: 100%; min-width: 0; }
   .card, .card > *, .sub > *, .rowflex > * { min-width: 0; }
-  .gloss dt { font-weight: 700; margin-top: 8px; } .gloss dd { margin: 2px 0 0; }
+  .gloss p { margin: 0 0 8px; }
   /* First visit (v3.0): three steps for a friend opening the shared copy. */
   .welcome { border-color: var(--accent); }
   @media (min-width: 980px) { #welcome { grid-column: 1 / -1; } }
@@ -337,7 +337,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Match view: just the next buy and what matters now, in large type. Full view: everything.">Match view</button>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.0</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.0.1</span>
     <span class="small updnote" id="updNote" hidden></span>
     <button id="reviewOpen" class="linkbtn small" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
     <button id="glossOpen" class="linkbtn small" type="button">Glossary</button>
@@ -531,7 +531,8 @@
 <div id="glossOverlay" class="overlay" hidden>
   <div class="sheet notes" role="dialog" aria-modal="true" aria-labelledby="glossTitle">
     <div class="mod-head"><h2 id="glossTitle">Glossary</h2><button id="glossClose" class="btn" type="button">Close</button></div>
-    <dl id="glossBody" class="gloss scroll"></dl>
+    <!-- Placeholder (v3.0.1, Moppy's decision): the v3.0 glossary text was unclear. To be rewritten once its content is decided (roadmap, v3.1). -->
+    <div id="glossBody" class="gloss scroll"><p><b>Feature Pending</b></p><p>Thanks for using my tool!</p><p>-moppy</p></div>
   </div>
 </div>
 <div id="reviewOverlay" class="overlay" hidden>
@@ -585,10 +586,15 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.0";   // shown in the top bar and written into match records
+const VERSION = "v3.0.1";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.0.1", date: "October 15, 2026", items: [
+    "Upgrades show their tier on the buy order and in Match view (\"Upgrade to Tier 2\"). Their price is only the difference you pay, so a Tier 2 upgrade looked like an 800-soul Tier 1 item.",
+    "Fixed: if you mark an item as bought but buy only its part in the game, the part now takes its place within about a minute (it took 4 minutes, and the souls estimate was too low meanwhile).",
+    "Match review: when the data service can't get a match from Valve's servers yet (\"code 503\"), it says so in plain words and tries once more by itself.",
+    "The Glossary is on hold while its content is reworked."] },
   { v: "v3.0", date: "October 15, 2026", items: [
     "New: Match view (button in the top bar; the default on phones). The next buy in large type, the souls still needed, one alert at a time, and the next few steps. Details are one tap away; Full view brings the board back.",
     "Alerts that come and go by themselves: you're dead so shop now, you can afford the next buy, slots full so sell first, hatch the Egg, souls held unspent for 2 minutes.",
@@ -3954,7 +3960,7 @@ function unlinkMatch(quiet) {
   Object.assign(LIVE, { streams: {}, deathReplay: null, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
     itemsOk: false, itemsChecked: false, idSeen: 0, idKnown: 0, idSamples: [], knownSet: null, rawItemSample: "", rawSoulsSample: "", soulsRows: 0, invSig: "", souls: null, nw: null, meHow: null,
     laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
-    connecting: false, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
+    connecting: false, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, ownLivePrev: null, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
   clearTimeout(LIVE.soulsCheck);
   S.matchId = null;
   renderSources();
@@ -4746,7 +4752,19 @@ const itemName = id => S.itemById[id]?.name || "your item";
    net worth over time and deaths. The engine runs at each of your purchases and every minute with the statistics it would
    have used (your rank setting and period now), and reviewFindings turns that into plain observations. Other players'
    accounts are only used to find you, and nothing about them is kept. */
-const REVIEW = { busy: false, last: null };
+const REVIEW = { busy: false, last: null, retryS: 65 };
+/* Why the match details couldn't be fetched, in plain words (v3.0.1). The data service keeps a copy of each match's details;
+   until it has one, it asks Valve's servers, which are often busy (then it answers 503, "unavailable") and allow only a few
+   such lookups an hour (429). After a failed lookup it refuses the same match for a minute. (Its source code:
+   api/src/routes/v1/matches/metadata.rs.) Up to v3.0 a 503 was shown as a bare error code (Moppy, October 15). */
+function reviewFetchProblem(e) {
+  const s = e?.status;
+  if (s === 404) return { text: "The details of that match aren't available yet. They usually arrive within an hour of the match ending (sometimes later); try again then.", retry: false };
+  if (s === 429) return { text: "The data service only fetches a few new matches from Valve an hour for each person, and that limit is reached. Try again in a while.", retry: false };
+  if (s === 400) return { text: "The data service didn't accept that match ID. Check the number.", retry: false };
+  if (!s || s >= 500) return { text: "The data service couldn't get this match from Valve's servers just now (they're often busy in the first hours after a match).", retry: true };
+  return { text: `Couldn't get the match details: ${e.message}`, retry: false };
+}
 function openReview(matchId) {
   $("reviewMatch").value = matchId ?? (REVIEW.last?.id || S.endedMatchId || S.lastMatchId || "");
   $("reviewOverlay").hidden = false;
@@ -4804,11 +4822,20 @@ async function runReview() {
   REVIEW.busy = true; $("reviewGo").disabled = true; $("reviewBody").innerHTML = "";
   try {
     reviewStatus("Fetching the match details…");
-    let meta;
-    try { meta = await getJSON(`/v1/matches/${id}/metadata`); }
-    catch (e) {
-      reviewStatus(e.status === 404 ? "The details of that match aren't available yet. They usually arrive within an hour of the match ending (sometimes later); try again then."
-        : `Couldn't get the match details: ${e.message}`, "warn"); return;
+    let meta = null;
+    for (let attempt = 0; !meta; attempt++) {
+      try { meta = await getJSON(`/v1/matches/${id}/metadata`); }
+      catch (e) {
+        const pr = reviewFetchProblem(e);
+        if (!pr.retry || attempt >= 1 || $("reviewOverlay").hidden) { reviewStatus(pr.retry && attempt >= 1 ? pr.text + " It still couldn't after a second try. Try again later: a match is usually available within a few hours." : pr.text, "warn"); return; }
+        // One automatic second try, after the minute the data service waits before asking Valve again for the same match.
+        for (let left = REVIEW.retryS; left > 0; left--) {
+          if ($("reviewOverlay").hidden) { reviewStatus(pr.text, "warn"); return; }
+          reviewStatus(`${pr.text} Trying again in ${left} s…`, "warn");
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        reviewStatus("Fetching the match details (second try)…");
+      }
     }
     const match = matchFromMetadata(meta);
     const mine = match.players.filter(x => S.steam && x.account === S.steam.accountId);
@@ -4922,7 +4949,9 @@ function stepMarks(entry) {
   if (entry.sell) { const m = document.createElement("span"); m.className = "tag-sell"; m.textContent = `${entry.sell.later ? "If slots are still full: sell" : "Sell"} ${entry.sell.item?.name || "an item"} first (+${entry.sell.refund.toLocaleString()}) · `; out.push(m); }
   if (entry.exception) { const m = document.createElement("span"); m.className = "tag-ex"; m.textContent = "Repurchase · "; out.push(m); }
   // How this step fits an upgrade path, at a glance.
-  const pathMark = entry.upgrade ? "Upgrade · " : entry.path?.kind === "direct" ? "Outright · " : entry.why?.startsWith("Builds into") ? "Part first · " : "";
+  // An upgrade shows its tier (v3.0.1): its price is only the difference you pay (800 for most Tier 2 upgrades), so without it a
+  // Tier 2 upgrade looked like a Tier 1 item (Moppy's Deadman Danny match, October 15).
+  const pathMark = entry.upgrade ? `Upgrade to Tier ${entry.s.item.item_tier} · ` : entry.path?.kind === "direct" ? "Outright · " : entry.why?.startsWith("Builds into") ? "Part first · " : "";
   if (pathMark) { const m = document.createElement("span"); m.className = "tag-path"; m.textContent = pathMark; m.title = entry.pathText || entry.plan || ""; out.push(m); }
   const ch = changeNote(entry.s.item.id);
   if (ch) { const m = document.createElement("span"); m.className = "tag-ex"; m.textContent = ch.short + " · "; m.title = ch.long; out.push(m); }
@@ -5135,7 +5164,7 @@ function renderMatchView() {
   const mid = document.createElement("div"); mid.style.minWidth = "0";
   mid.innerHTML = `<div class="mv-eyebrow">Buy next${next.sell ? " · slots full" : ""}</div><div class="mv-name"></div><div class="mv-cost"><span class="price"></span> · <span class="${need ? "need" : "can"}"></span></div>`;
   mid.querySelector(".mv-name").textContent = it.name;
-  mid.querySelector(".price").textContent = `${next.s.cost.toLocaleString()} souls`;
+  mid.querySelector(".price").textContent = `${next.s.cost.toLocaleString()} souls` + (next.upgrade ? ` (upgrade to Tier ${it.item_tier})` : "");
   mid.querySelector(need ? ".need" : ".can").textContent = need ? `${need.toLocaleString()} more needed` : "you can buy it now";
   const bar = document.createElement("div"); bar.className = "mv-bar"; bar.setAttribute("role", "progressbar"); bar.setAttribute("aria-label", "Souls toward the next buy");
   bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", String(total)); bar.setAttribute("aria-valuenow", String(Math.min(souls, total)));
@@ -5158,28 +5187,12 @@ function renderMatchView() {
     li.innerHTML = `<span class="nm"></span><span class="c"></span>`;
     li.querySelector(".nm").textContent = st.s.item.name;
     li.querySelector(".c").textContent = `${st.s.cost.toLocaleString()}` + (tot > souls ? ` · ${(tot - souls).toLocaleString()} more` : "");
+    if (st.upgrade) { const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = `Upgrade to Tier ${st.s.item.item_tier}`; li.append(sub); }
     if (st.sell) { const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = `${st.sell.later ? "If slots are still full: sell" : "Sell"} ${st.sell.item?.name || "an item"}`; li.append(sub); }
     then.append(li);
   }
   $("mvThenWrap").hidden = order.length < 2;
   if (!$("mvDetail").hidden) renderDetail(next, souls, S.view.label, $("mvDetail"));
-}
-/* Glossary (v3.0): the terms the explanations use. */
-const GLOSSARY = [
-  ["Points (pts)", "Win-rate points: +1 pt means players who did this won about 1% more of their games. Small numbers are normal: most items differ by a few points."],
-  ["Adjusted win rate", "The win rate of an item's buyers, re-weighted so players who were ahead and players who were behind count as they do overall. Plain win rates make expensive items look better than they are, because players who are already winning buy them sooner."],
-  ["Stage", "Laning (0 to 9 minutes), mid game (9 to 20) and late game (20 and on). An item's value is measured for the stage you'd buy it in."],
-  ["Counter", "An item that does better than usual against a particular enemy hero, after allowing for how your hero does against that enemy in general."],
-  ["Build fit", "How an item does alongside the items you already own. On real matches it predicted little, so it counts only a tenth."],
-  ["Parts and upgrades", "Many items build from cheaper ones. Buying the part first is progress: you pay only the difference later, and the part goes into the upgrade."],
-  ["Slots", "9 item slots, plus up to 3 more as your team destroys enemy Walkers. At most 4 active items. With full slots, buying something new means selling something (for half its price)."],
-  ["What the match needs", "Answers to what the enemies have built, from the live match: healing reduction against healing items, ways out of crowd control, resist against the damage they build."],
-  ["Enemy abilities", "What the enemy heroes' abilities do (stuns, healing, slows), read from the game data. Shown for information: the statistics already allow for them."],
-  ["Advice edge", "How much more often players who bought from the tool's top suggestions won than their team's lead at that moment predicted, measured on thousands of real matches."]
-];
-function renderGlossary() {
-  const dl = $("glossBody"); dl.replaceChildren();
-  for (const [t, d] of GLOSSARY) { const dt = document.createElement("dt"); dt.textContent = t; const dd = document.createElement("dd"); dd.textContent = d; dl.append(dt, dd); }
 }
 function renderDetail(entry, souls, labelText, box = $("detail")) {
   box.replaceChildren();
@@ -5556,13 +5569,23 @@ function renderBoard() {
    broadcast (1 to 2 minutes behind) agrees; anything else follows the match inventory. Items that leave
    without you removing them go to "Sold or removed". */
 const HOLD_MS = 240000;   // longer than the broadcast delay, so nothing flickers while it catches up
+/* A part of a marked item appears in the match after the mark (v3.0.1): you bought the part, not the item you marked (the game
+   buys an upgrade outright when you don't own its part, so its part never shows). The mark is then held only PART_HOLD_MS more,
+   in case you bought the upgrade right after the part. Up to v3.0 it was held the full 4 minutes and hid the part: in Moppy's
+   Venator match (October 15) Swift Striker, marked at 7:23, stood in for the Rapid Rounds bought at 8:03 until 11:33, and the
+   souls estimate was 1,600 too low meanwhile. */
+const PART_HOLD_MS = 60000;
 function syncOwnedFromLive(liveIds) {
   const now = Date.now(), live = new Set(liveIds);
-  S.markedAt ||= {}; S.removedAt ||= {};
-  for (const id of live) delete S.markedAt[id];                       // confirmed by the match
+  S.markedAt ||= {}; S.removedAt ||= {}; S.partSeenAt ||= {};
+  for (const id of live) { delete S.markedAt[id]; delete S.partSeenAt[id]; }   // confirmed by the match
   for (const id in S.removedAt) if (!live.has(Number(id))) delete S.removedAt[id];   // sale/removal confirmed
+  const prevLive = LIVE.ownLivePrev; LIVE.ownLivePrev = live;
+  const partsOf = id => (S.itemById[id]?.component_items || []).map(cls => S.itemByClass[cls]?.id).filter(Boolean);
+  if (prevLive) for (const id of S.owned) if (S.markedAt[id] && !live.has(id) && !S.partSeenAt[id] && partsOf(id).some(c => live.has(c) && !prevLive.has(c))) S.partSeenAt[id] = now;
+  const held = id => now - (S.markedAt[id] || 0) < HOLD_MS && !(S.partSeenAt[id] && now - S.partSeenAt[id] >= PART_HOLD_MS);
   const next = new Set([...live].filter(id => !(now - (S.removedAt[id] || 0) < HOLD_MS)));
-  for (const id of S.owned) if (!live.has(id) && now - (S.markedAt[id] || 0) < HOLD_MS) next.add(id);
+  for (const id of S.owned) if (!live.has(id) && held(id)) next.add(id);
   for (const id of [...next]) for (const cls of S.itemById[id]?.component_items || []) { const c = S.itemByClass[cls]; if (c && next.has(c.id) && next.has(id)) next.delete(c.id); }
   const same = next.size === S.owned.size && [...next].every(id => S.owned.has(id));
   if (same) { LIVE.ownedSyncedOnce = true; return; }
@@ -5570,7 +5593,7 @@ function syncOwnedFromLive(liveIds) {
   const usedUp = new Set([...next].flatMap(id => (S.itemById[id]?.component_items || []).map(cls => S.itemByClass[cls]?.id)));
   for (const id of S.owned) if (!next.has(id) && !usedUp.has(id) && !S.removedAt[id]) {
     noteSold(id, S.markedAt[id] ? "unconfirmed" : "match");   // a mark the match never confirmed, or a real sale
-    delete S.markedAt[id];
+    delete S.markedAt[id]; delete S.partSeenAt[id];
   }
   for (const id of next) forgetSold(id);
   // Purchase times: new items appeared at the broadcast's game time. Items already there the first time the
@@ -6000,7 +6023,7 @@ $("reviewGo").onclick = () => runReview();
 $("reviewMatch").onkeydown = e => { if (e.key === "Enter") runReview(); };
 $("notesOpen").onclick = () => { renderNotes(); $("notesOverlay").hidden = false; $("notesClose").focus(); };
 $("welcomeClose").onclick = () => { $("welcome").hidden = true; store.set("welcomed", true); };
-$("glossOpen").onclick = () => { renderGlossary(); $("glossOverlay").hidden = false; $("glossClose").focus(); };
+$("glossOpen").onclick = () => { $("glossOverlay").hidden = false; $("glossClose").focus(); };
 $("glossClose").onclick = () => { $("glossOverlay").hidden = true; };
 $("glossOverlay").onclick = e => { if (e.target === $("glossOverlay")) $("glossOverlay").hidden = true; };
 // Match view or full view (v3.0), remembered.
