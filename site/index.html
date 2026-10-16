@@ -50,6 +50,19 @@
   .statline select { max-width: 100%; min-width: 0; justify-self: start; }
   @media (max-width: 380px) { .statline { grid-template-columns: 1fr; gap: 3px; } }
   .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  /* "More" menu in the top bar (v3.1) */
+  .more { position: relative; }
+  .more > summary { list-style: none; cursor: pointer; }
+  .more > summary::-webkit-details-marker { display: none; }
+  .more > summary::after { content: " ▾"; }
+  .more-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 6px; display: grid; min-width: 170px; }
+  .more-pop .linkbtn { text-align: left; padding: 7px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); }
+  .more-pop .linkbtn:hover, .more-pop .linkbtn:focus-visible { background: var(--accent-soft); }
+  /* Phones (v3.1): the bar scrolls away instead of covering a fifth of the screen; item names get two lines, Bought shows as ✓. */
+  @media (max-width: 699px) { #bar { position: static; } }
+  @media (max-width: 480px) { .row .bw { display: none; } .row .name { white-space: normal; overflow: visible; line-height: 1.2; } }
+  @media (min-width: 980px) { .grid { max-height: none; } }   /* every hero visible on a wide screen, no half-cut row */
   .notes h3 { font-size: 14px; margin: 10px 0 4px; } .notes ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
   .notes .when { color: var(--muted); font-weight: 400; font-size: 12.5px; }
   .fb select { width: 100%; max-width: 100%; }
@@ -304,6 +317,32 @@
   select { max-width: 100%; min-width: 0; }
   .card, .card > *, .sub > *, .rowflex > * { min-width: 0; }
   .gloss p { margin: 0 0 8px; }
+  /* Item cards (v3.1): the tooltip beside an item, and the same card in the item's details. */
+  #itemTip { position: fixed; z-index: 40; width: 300px; max-width: calc(100vw - 16px); pointer-events: auto; }
+  .icard { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-top: 4px solid var(--accent); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.22); font-size: 13px; line-height: 1.35; overflow: hidden; }
+  .icard.weapon { border-top-color: var(--weapon); } .icard.spirit { border-top-color: var(--spirit); } .icard.vitality { border-top-color: var(--vitality); }
+  .icard.inline { box-shadow: none; margin-top: 4px; }
+  .ic-head { padding: 8px 10px 6px; }
+  .ic-name { font: 700 18px/1.1 var(--display); letter-spacing: .02em; }
+  .ic-sub { color: var(--muted); font-size: 12px; }
+  .icard.inline .ic-head, .icard.inline .ic-path { display: none; }   /* the details already show the name, price and upgrade path */
+  .icard.inline .ic-innate { padding-top: 8px; }
+  .ic-innate, .ic-other { list-style: none; margin: 0; padding: 0 10px 8px; display: grid; gap: 2px; }
+  .ic-innate li.big { font-size: 15px; }
+  .ic-v { font-variant-numeric: tabular-nums; }
+  .ic-sec { border-top: 1px solid var(--line); padding: 6px 10px 8px; display: grid; gap: 6px; }
+  .ic-sec-head { display: flex; justify-content: space-between; gap: 8px; font: 700 12px/1.2 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .ic-sec.active .ic-sec-head > span:first-child { color: var(--accent); }
+  .ic-cd { font-family: var(--body); letter-spacing: 0; text-transform: none; font-weight: 600; }
+  .ic-text b { color: var(--accent); font-weight: 700; } .ic-dim { color: var(--muted); }
+  .ic-main { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
+  .ic-tile { background: var(--accent-soft); border-radius: 6px; padding: 5px 7px; }
+  .ic-big { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .ic-lab { font-size: 12px; }
+  .ic-other { padding: 0; }
+  .ic-scale { display: inline-block; font-size: 11.5px; color: var(--spirit); font-weight: 600; }
+  .ic-path, .ic-hint { border-top: 1px solid var(--line); padding: 6px 10px; font-size: 12px; color: var(--muted); }
   /* First visit (v3.0): three steps for a friend opening the shared copy. */
   .welcome { border-color: var(--accent); }
   @media (min-width: 980px) { #welcome { grid-column: 1 / -1; } }
@@ -337,12 +376,18 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Match view: just the next buy and what matters now, in large type. Full view: everything.">Match view</button>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.0.2</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.1</span>
     <span class="small updnote" id="updNote" hidden></span>
-    <button id="reviewOpen" class="linkbtn small" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
-    <button id="glossOpen" class="linkbtn small" type="button">Glossary</button>
-    <button id="notesOpen" class="linkbtn small" type="button">What's new</button>
-    <button id="feedbackOpen" class="linkbtn small" type="button">Feedback</button>
+    <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
+    <details id="moreMenu" class="more">
+      <summary class="btn">More</summary>
+      <div class="more-pop">
+        <button id="reviewOpen" class="linkbtn" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
+        <button id="glossOpen" class="linkbtn" type="button">Glossary</button>
+        <button id="notesOpen" class="linkbtn" type="button">What's new</button>
+        <button id="feedbackOpen" class="linkbtn" type="button">Feedback</button>
+      </div>
+    </details>
   </div>
 
   <div id="setup">
@@ -586,10 +631,15 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.0.2";   // shown in the top bar and written into match records
+const VERSION = "v3.1";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.1", date: "October 16, 2026", items: [
+    "New: item cards. Rest the mouse on any item for a moment and a card like the game's shows what it does: price (what you'd pay with the parts you own), tier, stats, passive and active effects with their numbers and cooldowns, what grows with Spirit Power, and what it builds from and into. On a phone, tap the item: the card is in its details.",
+    "Tidier top bar: Review a match, Glossary, What's new and Feedback are under More. On phones the bar no longer stays pinned over the page, and item names in lists get two lines.",
+    "Clearer lists: a counter that's weak overall now says \"Weak overall, so not planned\", so the lists and the buy order no longer seem to disagree.",
+    "If you pick a rank by hand and this match's lobby is two or more tiers away, the tool says so and offers Use Automatic."] },
   { v: "v3.0.2", date: "October 15, 2026", items: [
     "Fixed: an item bought mid-game could suddenly look weak at 20:00 and be suggested for a swap (Spirit Lifesteal for Bullet Lifesteal in a friend's Infernus match). Items you own are now judged by the players who bought them when you did, all the way through.",
     "Fixed: the buy order never sells an item it suggests buying a step earlier."] },
@@ -960,6 +1010,80 @@ function itemText(it) {
   t = t.replace(/\{s:([A-Za-z0-9_]+)\}/g, (_, k) => it.properties?.[k]?.value ?? "?");
   t = t.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
   return t;
+}
+
+/* ---------- Item cards (v3.1) ----------
+   What the game's own item card shows, for the item tooltips: price and tier, the stats it always gives (innate), and each
+   passive or active effect with its text, its main numbers, its other numbers and its cooldown; what grows with Spirit Power
+   or with level; what it builds from and into. All from the game data loaded at start-up (the data service's item list, read
+   from Valve's game files, tooltip_sections and properties), so it follows every patch; nothing here names an item.
+   Text comes as the game's markup: it's turned into plain segments (k: "b" highlighted, "d" dimmed), never inserted as HTML. */
+function cardSegments(html) {
+  const decode = t => t.replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  const src = String(html || "").replace(/<svg[\s\S]*?<\/svg>/gi, "").replace(/<img[^>]*>/gi, "").replace(/<br\s*\/?>/gi, " ");
+  const out = [], stack = [], re = /<(\/?)([a-z0-9]+)([^>]*)>|([^<]+)/gi;
+  let m;
+  while ((m = re.exec(src))) {
+    if (m[4] != null) {
+      const t = decode(m[4]).replace(/\s+/g, " ");
+      if (!t) continue;
+      const k = stack.includes("b") ? "b" : stack.includes("d") ? "d" : "";
+      const last = out[out.length - 1];
+      if (last && last.k === k) last.t += t; else out.push({ t, k });
+    } else if (m[1]) stack.pop();
+    else if (!/\/\s*$/.test(m[3])) stack.push(/highlight|inline-attribute-label/.test(m[3]) || /^(b|strong)$/i.test(m[2]) ? "b" : /diminish/.test(m[3]) ? "d" : "");
+  }
+  if (out.length) { out[0].t = out[0].t.replace(/^\s+/, ""); out[out.length - 1].t = out[out.length - 1].t.replace(/\s+$/, ""); }
+  return out.filter(x => x.t);
+}
+/* One stat as the card shows it: { value: "+90", label: "Bonus Health", scale } or null when it has nothing to show (no label,
+   zero, or the game's "disabled" value). scale: how much it grows per point of Spirit Power or per level boon. */
+function cardStat(p) {
+  if (!p || p.value == null) return null;
+  const label = p.label || p.postvalue_label;
+  const raw = String(p.value).trim();
+  if (!label || raw === "" || (p.disable_value != null && raw === String(p.disable_value))) return null;
+  const n = parseFloat(raw);
+  if (Number.isFinite(n) && n === 0) return null;
+  const numeric = Number.isFinite(n) && /^[-+]?\d*\.?\d+[a-z%]*$/i.test(raw);
+  const sign = numeric && n > 0 && (p.prefix === "{s:sign}" || p.prefix === "+") ? "+" : "";
+  const post = String(p.postfix || "").replace(/^\s+/, " ");
+  const value = sign + (numeric ? String(+n.toFixed(2)) : raw) + (numeric ? post : "");
+  const sf = p.scale_function, k = Number(sf?.stat_scale);
+  const by = sf && k > 0 ? (sf.specific_stat_scale_type === "ETechPower" || /spirit/i.test(sf.class_name || "") ? "Spirit Power"
+    : sf.specific_stat_scale_type === "ELevelUpBoons" || /boon/i.test(sf.class_name || "") ? "level boon" : null) : null;
+  // A condition the label doesn't already say ("against NPCs" on "Weapon Damage vs. NPCs" adds nothing).
+  const cond = p.conditional && !String(p.conditional).split(/\s+/).filter(w => w.length > 3).some(w => label.toLowerCase().includes(w.toLowerCase())) ? ` (${p.conditional})` : "";
+  return { value, label: label + cond, scale: by ? { by, n: +k.toFixed(3) } : null };
+}
+function itemCardModel(it, itemByClass = {}, prog = null, itemById = {}) {
+  const P = it.properties || {}, stat = k => cardStat(P[k]);
+  const innate = [], blocks = [];
+  const secs = Array.isArray(it.tooltip_sections) ? it.tooltip_sections : [];
+  const hasActive = secs.some(s => s.section_type === "active");
+  for (const s of secs) for (const a of s.section_attributes || []) {
+    if (s.section_type === "innate") {
+      for (const k of a.elevated_properties || []) { const x = stat(k); if (x) innate.push({ ...x, big: true }); }
+      for (const k of a.properties || []) { const x = stat(k); if (x) innate.push(x); }
+      continue;
+    }
+    const type = s.section_type || (it.is_active_item && !hasActive ? "active" : "passive");
+    const keys = a.properties || [];
+    const cd = parseFloat(P.AbilityCooldown?.value);
+    const cooldown = (keys.includes("AbilityCooldown") || (type === "active" && it.is_active_item)) && cd > 0 ? `${+cd.toFixed(1)}s` : null;
+    const main = (a.important_properties || []).map(stat).filter(Boolean);
+    const other = keys.filter(k => k !== "AbilityCooldown").map(stat).filter(Boolean);
+    const text = cardSegments(a.loc_string);
+    if (text.length || main.length || other.length) blocks.push({ type, cooldown, text, main, other });
+  }
+  if (!secs.length) {   // older or unusual data: the labelled stats and the description
+    for (const [k, p] of Object.entries(P)) if (!/^Ability/.test(k)) { const x = cardStat(p); if (x) innate.push(x); }
+    const text = cardSegments(it.description?.desc || it.description?.passive || it.description?.active || "");
+    if (text.length) blocks.push({ type: it.is_active_item ? "active" : "passive", cooldown: null, text, main: [], other: [] });
+  }
+  const from = (it.component_items || []).map(c => itemByClass[c]?.name).filter(Boolean);
+  const into = [...(prog?.ups?.get(it.id) || [])].map(id => itemById[id]?.name).filter(Boolean);
+  return { name: it.name, cost: it.cost || 0, tier: it.item_tier || null, slot: it.item_slot_type || "", active: !!it.is_active_item, innate, blocks, from, into };
 }
 
 function effectiveCost(it, owned, itemByClass) {
@@ -2824,7 +2948,7 @@ function renderSold() {
   const chips = document.createElement("div"); chips.className = "chips";
   for (const x of S.sold) {
     const it = S.itemById[x.id];
-    const c = document.createElement("button"); c.type = "button"; c.className = "chip " + it.item_slot_type;
+    const c = document.createElement("button"); c.type = "button"; c.className = "chip " + it.item_slot_type; c.dataset.tip = it.id;
     c.dataset.id = it.id;
     const how = { match: "Sold in the match", unconfirmed: "Marked bought, but the match never showed it, so it was taken off", you: "Removed by you" }[x.how] || "Removed";
     c.title = `${how} ${Math.max(1, Math.round((now - x.at) / 60000))} min ago. Tap to put it back in your build.`;
@@ -2858,7 +2982,7 @@ function renderOwned() {
   if (!S.owned.size) { const p = document.createElement("span"); p.className = "muted small"; p.textContent = "Nothing owned yet. Tap ✓ Bought on a recommendation, or add items here."; chips.append(p); }
   for (const id of S.owned) {
     const it = S.itemById[id]; if (!it) continue;
-    const c = document.createElement("button"); c.type = "button"; c.className = "chip " + it.item_slot_type; c.title = `Remove ${it.name} (sold it, or marked by mistake)`; c.dataset.id = id;
+    const c = document.createElement("button"); c.type = "button"; c.className = "chip " + it.item_slot_type; c.dataset.tip = it.id; c.title = `Remove ${it.name} (sold it, or marked by mistake)`; c.dataset.id = id;
     const t = document.createElement("span"); t.textContent = it.name;
     const x = document.createElement("span"); x.className = "x"; x.textContent = "✕"; x.setAttribute("aria-hidden", "true");
     c.append(img(itemIcon(it)), t, x);
@@ -2923,6 +3047,21 @@ function rankChoice() {
     label: `${lob ? `lobbies like this one (average ${rankName(c)})` : `lobbies around your rank (${rankName(c)})`}: ${rangeLabel(lo, hi)}${note}` };
 }
 function rankBounds() { const c = rankChoice(); return [c.lo, c.hi]; }
+/* A rank picked by hand that's two or more tiers from this match's lobby (v3.1): the statistics describe other games. In two of
+   Moppy's records (October 15) "Seeker lobbies" was set while the lobby averaged Ritualist. Said in the rank notes, and once
+   per match as a message with a button to switch to Automatic. Nothing changes by itself: a hand-picked rank is a choice. */
+function rankMismatch() {
+  const m = /^t(\d+)$/.exec($("rankRange")?.value || ""), lob = LIVE.id && LIVE.lobby && LIVE.lobby.n >= LOBBY_MIN_RANKED ? LIVE.lobby : null;
+  if (!m || !lob || lob.avg == null) return null;
+  const t = +m[1], lt = Math.floor(Math.round(lob.avg) / 10);
+  return Math.abs(lt - t) >= 2 ? `This match's lobby averages ${rankName(Math.round(lob.avg))}, but the statistics are set to ${tierLabel(t)} lobbies. Automatic would use this lobby's rank.` : null;
+}
+function rankMismatchToast() {
+  const msg = rankMismatch();
+  if (!msg || S.rankMismatchShown === LIVE.id) return;
+  S.rankMismatchShown = LIVE.id;
+  showToast(msg, { more: () => { $("rankRange").value = "auto"; $("rankRange").onchange(); }, moreLabel: "Use Automatic" });
+}
 /* The data period: your last choice if it's available (the patch option needs the patch list), otherwise the default
    (since the latest patch, or the last 30 days when the patch is under a week old). */
 function windowDefault() {
@@ -2940,7 +3079,8 @@ function renderRankNote() {
     widened: `Statistics from every rank: even widened three times, there were too few games for ${S.me ? heroName(S.me) : "this hero"} near your rank (usually a hero released in the last few days). It narrows again when you change the rank setting or start a new match.`,
     tier: `Statistics from matches where the lobby averaged ${c.label.replace(/ lobbies.*/, "")}${S.rankWiden ? `, widened to ${rangeLabel(c.lo, c.hi)} because there were few games at that rank` : ""}.`
   }[c.src];
-  $("rankNote").textContent = t + (S.ranksSource === "fallback" ? " (Rank names couldn't be loaded, so tiers are numbered.)" : "");
+  const mm = rankMismatch();
+  $("rankNote").textContent = t + (mm ? " " + mm : "") + (S.ranksSource === "fallback" ? " (Rank names couldn't be loaded, so tiers are numbered.)" : "");
   syncStatControls();
 }
 /* The same two choices on the live match card (v2.7.4), mirroring the ones in Manual setup: one setting, two places.
@@ -2958,7 +3098,7 @@ function syncStatControls() {
   const c = rankChoice(), win = timeWindow();
   const note = $("liveStatNote");
   if (note) note.textContent = `Using ${c.label}, ${win.label}.`
-    + (c.src === "none" ? " The rank narrows once your Steam account or the match's lobby is known." : "") + (c.src === "all" ? allRanksHint() : "");
+    + (c.src === "none" ? " The rank narrows once your Steam account or the match's lobby is known." : "") + (c.src === "all" ? allRanksHint() : "") + (rankMismatch() ? " " + rankMismatch() : "");
 }
 /* "All ranks" mixes beginners and experts (v2.8.3). Items experienced players favour then look better than they are at
    your rank: in a recorded Seven match (lobby about rank 50), Extra Health was 0.9 points above the average early item
@@ -3018,7 +3158,7 @@ async function fetchLobbyRank() {
     if (LIVE.id !== id) return;
     const badges = accounts.map(a => m.get(a) || 0).filter(b => b > 0);
     LIVE.lobby = { matchId: id, n: badges.length, total: accounts.length, avg: badges.length ? badges.reduce((a, b) => a + b, 0) / badges.length : null, at: Date.now() };
-    if ($("rankRange").value === "auto") rankChanged(); else renderRankNote();
+    if ($("rankRange").value === "auto") rankChanged(); else { renderRankNote(); rankMismatchToast(); }
     renderLive();
   } catch { LIVE.lobbyRetryAt = Date.now() + 60000; }
   finally { LIVE.lobbyFetching = false; }
@@ -4939,8 +5079,13 @@ function shortReason(s, kind, why) {
   if (s.mechWhy?.length && kind === "counter" && !(s.bestZ >= STRONG_Z && s.score > 0.005)) return s.mechWhy[0];
   const helps = (s.vs || []).filter(v => v.lift > 0).sort((a, b) => b.lift - a.lift).slice(0, 2);
   const txt = (s.mechWhy?.length ? [s.mechWhy[0].replace(/ \(.*\)/, "")] : []).concat(helps.map(v => `${pts(v.lift)} vs ${heroName(v.enemyId)}`)).join(" · ") || "Counter pick";
-  return s.fitZ >= STRONG_Z ? txt + " · fits your build" : txt;
+  // A counter that's weak overall isn't planned (v3.1): say so first, or the list and the buy order seem to disagree (a friend's
+  // Infernus match: Metal Skin listed as a counter, never planned, because players who buy it that late do worse overall).
+  const out = weakCounter(s) ? "Weak overall, so not planned · " + txt : txt;
+  return s.fitZ >= STRONG_Z ? out + " · fits your build" : out;
 }
+/* A counter or situational item whose overall value is below zero and that the buy order leaves out. */
+function weakCounter(s) { return !!(s && s.base && itemValue(s) < 0 && !(S.view?.order || []).some(st => st.s.item.id === s.item.id) && ((s.vs || []).some(v => v.lift > 0) || s.mechWhy?.length)); }
 
 function costCell(s, souls, total) {
   const c = document.createElement("span"); c.className = "cost";
@@ -4962,7 +5107,9 @@ function skipButton(it, entry, label = "✕") {
 }
 function buyButton(it, cost, label = "✓ Bought") {
   const b = document.createElement("button"); b.type = "button"; b.className = "buy";
-  b.textContent = label; b.title = `Mark ${it.name} as bought (−${cost.toLocaleString()} souls)`;
+  if (label === "✓ Bought") { const w = document.createElement("span"); w.className = "bw"; w.textContent = " Bought"; b.append("✓", w); }   // on a narrow phone only ✓ shows (v3.1)
+  else b.textContent = label;
+  b.title = `Mark ${it.name} as bought (−${cost.toLocaleString()} souls)`;
   b.setAttribute("aria-label", `Mark ${it.name} as bought`);
   b.onclick = e => { e.stopPropagation(); markBought(it, cost); };
   return b;
@@ -5000,7 +5147,7 @@ function changeNote(id) {
 function rowEl(entry, souls, n) {
   const { s, kind, why } = entry;
   const it = s.item;
-  const el = document.createElement("div"); el.className = "row " + it.item_slot_type;
+  const el = document.createElement("div"); el.className = "row " + it.item_slot_type; el.dataset.tip = it.id;
   const ord = document.createElement("span"); ord.className = "ord"; ord.textContent = n ?? "";
   const mid = document.createElement("span"); mid.style.minWidth = "0";
   const nm = document.createElement("span"); nm.className = "name"; nm.textContent = it.name;
@@ -5015,7 +5162,7 @@ function rowEl(entry, souls, n) {
 function nextCard(entry, souls) {
   const { s, kind, why } = entry;
   const it = s.item;
-  const el = document.createElement("div"); el.className = "next " + it.item_slot_type;
+  const el = document.createElement("div"); el.className = "next " + it.item_slot_type; el.dataset.tip = it.id;
   const mid = document.createElement("div"); mid.style.minWidth = "0";
   const eb = document.createElement("div"); eb.className = "eyebrow"; eb.textContent = "Buy next";
   const nm = document.createElement("div"); nm.className = "name"; nm.textContent = it.name;
@@ -5190,9 +5337,9 @@ function renderMatchView() {
   const al = currentAlert(souls), box = $("mvAlert");
   box.hidden = !al; box.textContent = al ? al.text : ""; box.dataset.kind = al ? al.kind : "";
   const nx = $("mvNext"); nx.replaceChildren();
-  if (!next) { nx.className = ""; nx.innerHTML = `<p class="muted">No buy order yet. ${S.view.empty ? "No games found for these settings." : "Waiting for statistics…"}</p>`; $("mvWhy").replaceChildren(); $("mvThenWrap").hidden = true; return; }
+  if (!next) { nx.className = ""; delete nx.dataset.tip; nx.innerHTML = `<p class="muted">No buy order yet. ${S.view.empty ? "No games found for these settings." : "Waiting for statistics…"}</p>`; $("mvWhy").replaceChildren(); $("mvThenWrap").hidden = true; return; }
   const it = next.s.item, total = next.cumulative ?? next.s.cost, need = Math.max(0, total - souls);
-  nx.className = "mv-next " + it.item_slot_type;
+  nx.className = "mv-next " + it.item_slot_type; nx.dataset.tip = it.id;
   const mid = document.createElement("div"); mid.style.minWidth = "0";
   mid.innerHTML = `<div class="mv-eyebrow">Buy next${next.sell ? " · slots full" : ""}</div><div class="mv-name"></div><div class="mv-cost"><span class="price"></span> · <span class="${need ? "need" : "can"}"></span></div>`;
   mid.querySelector(".mv-name").textContent = it.name;
@@ -5215,7 +5362,7 @@ function renderMatchView() {
   // The next few steps.
   const then = $("mvThen"); then.replaceChildren();
   for (const st of order.slice(1, 4)) {
-    const li = document.createElement("li"), tot = st.cumulative ?? st.s.cost;
+    const li = document.createElement("li"), tot = st.cumulative ?? st.s.cost; li.dataset.tip = st.s.item.id;
     li.innerHTML = `<span class="nm"></span><span class="c"></span>`;
     li.querySelector(".nm").textContent = st.s.item.name;
     li.querySelector(".c").textContent = `${st.s.cost.toLocaleString()}` + (tot > souls ? ` · ${(tot - souls).toLocaleString()} more` : "");
@@ -5226,6 +5373,141 @@ function renderMatchView() {
   $("mvThenWrap").hidden = order.length < 2;
   if (!$("mvDetail").hidden) renderDetail(next, souls, S.view.label, $("mvDetail"));
 }
+/* ---------- Item cards (v3.1) ----------
+   The game-style card (itemCardModel) as a tooltip: hover an item with the mouse for a moment (or reach it with the keyboard)
+   and it appears beside the item, never over it; it stays while the pointer is on the item or the card and goes when it leaves
+   (or with Escape). Touch screens have no hover: there the same card is in the item's details (tap the item). Anything marked
+   data-tip="<item id>" gets it. An element's own tooltip text (title) moves into the card's last line while it shows. */
+function itemCardEl(it, hint = "") {
+  const m = itemCardModel(it, S.itemByClass, S.prog, S.itemById);
+  const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const scale = sc => mk("span", "ic-scale", `+${sc.n} per ${sc.by}`);
+  const el = mk("div", "icard " + m.slot);
+  const head = mk("div", "ic-head");
+  // Like the game: an upgrade of something you own costs only the difference (Radiant Regeneration shows 2,400 with Mystic Regeneration).
+  const eff = S.owned?.size ? effectiveCost(it, S.owned, S.itemByClass) : m.cost;
+  const price = eff < m.cost ? `${eff.toLocaleString()} souls with your ${m.from.filter(n => [...S.owned].some(id => S.itemById[id]?.name === n)).join(" and ") || "parts"} (${m.cost.toLocaleString()} in all)` : `${m.cost.toLocaleString()} souls`;
+  head.append(mk("div", "ic-name", m.name), mk("div", "ic-sub", `${price} · Tier ${m.tier} ${m.slot}${m.active ? " · active" : ""}`));
+  el.append(head);
+  if (m.innate.length) {
+    const ul = mk("ul", "ic-innate");
+    for (const x of m.innate) { const li = mk("li", x.big ? "big" : ""); li.append(mk("b", "ic-v", x.value), " " + x.label); if (x.scale) li.append(" ", scale(x.scale)); ul.append(li); }
+    el.append(ul);
+  }
+  for (const b of m.blocks) {
+    const sec = mk("div", "ic-sec " + b.type);
+    const h = mk("div", "ic-sec-head"); h.append(mk("span", "", b.type === "active" ? "Active" : "Passive"));
+    if (b.cooldown) h.append(mk("span", "ic-cd", `Cooldown ${b.cooldown}`));
+    sec.append(h);
+    if (b.text.length) { const p = mk("p", "ic-text"); for (const x of b.text) p.append(x.k === "b" ? mk("b", "", x.t) : x.k === "d" ? mk("span", "ic-dim", x.t) : x.t); sec.append(p); }
+    if (b.main.length) {
+      const g = mk("div", "ic-main");
+      for (const x of b.main) { const t = mk("div", "ic-tile"); t.append(mk("div", "ic-big", x.value), mk("div", "ic-lab", x.label)); if (x.scale) t.append(scale(x.scale)); g.append(t); }
+      sec.append(g);
+    }
+    if (b.other.length) { const ul = mk("ul", "ic-other"); for (const x of b.other) { const li = mk("li"); li.append(mk("b", "", x.value), " " + x.label); if (x.scale) li.append(" ", scale(x.scale)); ul.append(li); } sec.append(ul); }
+    el.append(sec);
+  }
+  const path = [m.from.length ? `Builds from ${m.from.join(", ")}` : "", m.into.length ? `Upgrades into ${m.into.join(", ")}` : ""].filter(Boolean);
+  if (path.length) el.append(mk("p", "ic-path", path.join(" · ")));
+  if (hint) el.append(mk("p", "ic-hint", hint));
+  return el;
+}
+const TIP = { for: null, pending: null, show: 0, hide: 0, x: -1, y: -1, quiet: false };
+const TIP_DELAY_MS = 300;
+function tipBox() {
+  let e = document.getElementById("itemTip");
+  if (!e) {
+    e = document.createElement("div"); e.id = "itemTip"; e.setAttribute("role", "tooltip"); e.hidden = true; document.body.append(e);
+    e.addEventListener("pointerenter", () => clearTimeout(TIP.hide));
+    e.addEventListener("pointerleave", ev => { if (!(ev.relatedTarget && TIP.for && TIP.for.contains(ev.relatedTarget))) hideTipSoon(); });
+  }
+  return e;
+}
+function tipRelease() {
+  const t = TIP.for; TIP.for = null;
+  if (!t) return;
+  if (t.dataset.tipTitle != null) { t.title = t.dataset.tipTitle; delete t.dataset.tipTitle; }
+  t.removeAttribute("aria-describedby");
+}
+function tipTake(t) {
+  tipRelease(); TIP.for = t;
+  if (t.title) { t.dataset.tipTitle = t.title; t.removeAttribute("title"); }
+  t.setAttribute("aria-describedby", "itemTip");
+}
+function placeTip(box, t) {
+  const r = t.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight, W = document.documentElement.clientWidth || innerWidth, H = innerHeight, g = 8;
+  let x = null, y;
+  if (r.right + g + w <= W - g) x = r.right + g; else if (r.left - g - w >= g) x = r.left - g - w;
+  if (x != null) y = Math.max(g, Math.min(r.top, H - h - g));
+  else { x = Math.max(g, Math.min(r.left, W - w - g)); y = H - r.bottom >= r.top ? r.bottom + g : r.top - g - h; y = Math.max(g, Math.min(y, H - h - g)); }
+  box.style.left = Math.round(x) + "px"; box.style.top = Math.round(y) + "px";
+}
+function showTip(t) {
+  const id = t?.dataset.tip, it = S.itemById[Number(id)];
+  // Redrawn while waiting (lists redraw as the match goes on): the new copy under the pointer.
+  if (t && !t.isConnected) t = TIP.x >= 0 ? document.elementFromPoint(TIP.x, TIP.y)?.closest?.("[data-tip]") : null;
+  if (!it || !t || t.dataset.tip !== id) return;
+  tipTake(t);
+  const box = tipBox();
+  box.replaceChildren(itemCardEl(it, t.dataset.tipTitle || ""));
+  box.hidden = false; placeTip(box, t);
+}
+function hideTip() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; const b = document.getElementById("itemTip"); if (b) b.hidden = true; tipRelease(); }
+function hideTipSoon() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; TIP.hide = setTimeout(hideTip, 150); }
+/* The board redraws itself as the match goes on: the card follows the new copy of the item under the pointer, or goes. */
+function refreshTip() {
+  if (!TIP.for || TIP.for.isConnected) return;
+  const id = TIP.for.dataset.tip, under = TIP.x >= 0 ? document.elementFromPoint(TIP.x, TIP.y)?.closest?.("[data-tip]") : null;
+  TIP.for = null;
+  if (under && under.dataset.tip === id) { tipTake(under); placeTip(tipBox(), under); return; }
+  clearTimeout(TIP.hide); tipBox().hidden = true;   // a card already on its way for another item still comes
+}
+/* The item an element belongs to, unless the pointer is on one of its buttons (Bought, Not for me: those have their own tooltip). */
+function tipFor(el) {
+  const t = el?.closest?.("[data-tip]"); if (!t) return null;
+  const ctl = el.closest("button, a, input, select, label");
+  return ctl && ctl !== t && t.contains(ctl) ? null : t;
+}
+/* The item under the mouse wants its card: after a pause, or quicker when moving straight from one item to the next. */
+function wantTip(t) {
+  if (t === TIP.for) { clearTimeout(TIP.hide); return; }
+  if (t === TIP.pending) return;
+  clearTimeout(TIP.show); clearTimeout(TIP.hide);
+  TIP.pending = t;
+  TIP.show = setTimeout(() => { TIP.pending = null; showTip(t); }, TIP.for ? 120 : TIP_DELAY_MS);
+}
+document.addEventListener("pointermove", e => {
+  if (e.pointerType !== "mouse") return;
+  if (TIP.quiet && (Math.abs(e.clientX - TIP.x) > 2 || Math.abs(e.clientY - TIP.y) > 2)) TIP.quiet = false;   // Escape holds until the mouse moves
+  TIP.x = e.clientX; TIP.y = e.clientY;
+  if (TIP.quiet || e.target.closest?.("#itemTip")) return;
+  const t = tipFor(e.target);
+  if (t) wantTip(t);   // also catches an item redrawn under a still mouse, once it moves
+}, { passive: true });
+document.addEventListener("pointerover", e => {
+  if (e.pointerType !== "mouse" || TIP.quiet) return;
+  if (e.target.closest?.("#itemTip")) { clearTimeout(TIP.hide); return; }
+  const t = tipFor(e.target);
+  if (t) wantTip(t);
+});
+document.addEventListener("pointerout", e => {
+  if (e.pointerType !== "mouse") return;
+  const from = e.target.closest?.("[data-tip]");
+  if (!from) return;
+  const to = e.relatedTarget;
+  if (to && (from.contains(to) || to.closest?.("#itemTip") || (TIP.for && TIP.for.contains(to)))) return;
+  hideTipSoon();
+});
+document.addEventListener("focusin", e => {
+  const t = e.target.closest?.("[data-tip]");
+  if (!t || !t.matches(":focus-visible")) return;
+  clearTimeout(TIP.show); TIP.show = setTimeout(() => { if (document.activeElement === t || t.contains(document.activeElement)) showTip(t); }, 400);
+});
+document.addEventListener("focusout", e => { if (e.target.closest?.("[data-tip]")) hideTipSoon(); });
+window.addEventListener("scroll", () => { if (TIP.for) hideTip(); }, true);
+new MutationObserver(() => { if (TIP.for && !TIP.for.isConnected) refreshTip(); }).observe(document.documentElement, { childList: true, subtree: true });
+
 function renderDetail(entry, souls, labelText, box = $("detail")) {
   box.replaceChildren();
   if (!entry) { box.innerHTML = `<p class="muted">Tap any item to see why it's recommended.</p>`; return; }
@@ -5278,6 +5560,7 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   if ((s.rarePenalty || 0) >= 0.003) warns.push([`Few ${heroName(S.me)} players buy it at this stage (${Math.max(0.1, Math.round((s.popShare || 0) * 1000) / 10)}% as many as the most popular item), so it needs a strong reason`, null]);
   if (s.amp?.none) warns.push([`Nothing to amplify: ${it.name} works with healing you apply${s.amp.noLifesteal ? " (abilities or items that heal, not lifesteal or regen)" : " (lifesteal, or abilities and items that heal)"}. Your hero's abilities don't heal and you own nothing that does, so only its basic stats count and it isn't planned.`, null]);
   else if (lacksReason(s)) warns.push(["Out of its stage, and nothing in this match calls for it, so it isn't planned", null]);
+  if (weakCounter(s) && kind !== "owned") warns.push([`It answers something in this match, but ${heroName(S.me)} players who buy it at this point do worse overall (${pts(itemValue(s))} pts all told), so it isn't in the buy order`, null]);
   if (s.overlap) warns.push([`Does the same job as ${s.overlap.with}, which you own (${TAG_NAMES[s.overlap.tag]}): only ${Math.round(s.overlap.factor * 100)}% of its usual advantage counts`, null]);
   if (entry.sell) warns.push([`Needs a free slot: sell ${entry.sell.item?.name || "an item"} first (you get back ${entry.sell.refund.toLocaleString()} souls)`, null]);
   const std = (kind === "core" || kind === "part") && s.base ? [[`Win rate when bought now (${s.base.players.toLocaleString()} players)`, pct(s.pb)]] : [];
@@ -5304,8 +5587,14 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   const patchRows = ch ? [[ch.long, null]] : [];
   for (const sec of [factList("Recent game update", patchRows), factList(three ? "Timing and value" : "Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList(S.view?.match?.live === false ? "From this match" : "From the live match", live), factList("Enemy abilities (for information: the statistics already allow for them)", kitInfo), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
   if (!s.base && kind !== "owned" && kind !== "search") { const p = document.createElement("p"); p.className = "muted small"; p.textContent = "Not enough games to rate this item by itself."; box.append(p); }
-  const text = itemText(it);
-  if (text) {
+  // What it does: the game-style card (v3.1; on a touch screen this is the tooltip's place), or the description as before.
+  const cm = itemCardModel(it, S.itemByClass, S.prog, S.itemById), text = itemText(it);
+  if (cm.innate.length || cm.blocks.length) {
+    const d = document.createElement("div"); d.className = "d-sec";
+    const h = document.createElement("h3"); h.textContent = "What it does";
+    const card = itemCardEl(it); card.classList.add("inline");
+    d.append(h, card); box.append(d);
+  } else if (text) {
     const d = document.createElement("div"); d.className = "d-sec";
     d.innerHTML = `<h3>What it does</h3><p class="small"></p>`;
     d.lastChild.textContent = text; box.append(d);
@@ -5352,7 +5641,7 @@ function renderPlayers(box) {
       const chips = document.createElement("div"); chips.className = "chips";
       for (const id of p.items || []) {
         const it = S.itemById[id]; if (!it) continue;
-        const c = document.createElement("span"); c.className = "chip " + it.item_slot_type; c.style.cursor = "default";
+        const c = document.createElement("span"); c.className = "chip " + it.item_slot_type; c.dataset.tip = it.id; c.style.cursor = "default";
         const tags = [...tagsOf(it)].filter(t => t !== "aura").map(t => TAG_NAMES[t]);
         c.title = tags.length ? "Detected: " + tags.join(", ") : "";
         const t = document.createElement("span"); t.textContent = it.name + (tags.length && enemy ? " ⚑" : "");
@@ -5547,7 +5836,7 @@ function renderBoard() {
     const chips = document.createElement("div"); chips.className = "chips";
     for (const d of S.dropped) {
       const it = S.itemById[d.id]; if (!it) continue;
-      const c = document.createElement("button"); c.type = "button"; c.className = "chip " + it.item_slot_type;
+      const c = document.createElement("button"); c.type = "button"; c.className = "chip " + it.item_slot_type; c.dataset.tip = it.id;
       const cost = scoredById.get(d.id)?.cost ?? effectiveCost(it, S.owned, S.itemByClass);
       c.title = `Mark ${it.name} as bought`; c.dataset.id = it.id;
       const t = document.createElement("span"); t.textContent = `✓ ${it.name}`;
@@ -5596,6 +5885,7 @@ function renderBoard() {
   }
   renderDetail(sel, souls, label);
   renderMatchView();
+  refreshTip();
 }
 
 /* Your build follows the match. Items you marked or removed in the last 4 minutes are held until the
@@ -5650,7 +5940,7 @@ function renderBuildSearch() {
   if (!hits.length) { box.innerHTML = `<p class="muted small">No item matches that name.</p>`; return; }
   const cov = coveredNow();
   for (const it of hits) {
-    const row = document.createElement("div"); row.className = "srow " + it.item_slot_type;
+    const row = document.createElement("div"); row.className = "srow " + it.item_slot_type; row.dataset.tip = it.id;
     row.tabIndex = 0; row.setAttribute("role", "button"); row.title = "Show details";
     const nm = document.createElement("span"); nm.className = "name"; nm.textContent = it.name;
     const cost = effectiveCost(it, S.owned, S.itemByClass);
@@ -5731,7 +6021,7 @@ function renderSkipped() {
     const chips = document.createElement("div"); chips.className = "chips";
     for (const id of ids) {
       const it = S.itemById[id];
-      const c = document.createElement("button"); c.type = "button"; c.className = "chip " + it.item_slot_type; c.dataset.id = id; c.title = title(it);
+      const c = document.createElement("button"); c.type = "button"; c.className = "chip " + it.item_slot_type; c.dataset.tip = it.id; c.dataset.id = id; c.title = title(it);
       const t = document.createElement("span"); t.textContent = `↺ ${it.name}`;
       c.append(img(itemIcon(it)), t); c.onclick = () => onTap(id); chips.append(c);
     }
@@ -6050,6 +6340,10 @@ function renderNotes() {
   box.append(more);
 }
 $("reviewOpen").onclick = () => openReview();
+// The More menu closes after a choice, a click elsewhere, or Escape.
+document.querySelectorAll("#moreMenu .linkbtn").forEach(b => b.addEventListener("click", () => { $("moreMenu").open = false; }));
+document.addEventListener("click", e => { if ($("moreMenu").open && !e.target.closest("#moreMenu")) $("moreMenu").open = false; });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("moreMenu").open) { $("moreMenu").open = false; $("moreMenu").querySelector("summary").focus(); } });
 $("reviewClose").onclick = () => { $("reviewOverlay").hidden = true; };
 $("reviewOverlay").onclick = e => { if (e.target === $("reviewOverlay")) $("reviewOverlay").hidden = true; };
 $("reviewGo").onclick = () => runReview();
@@ -6102,6 +6396,7 @@ $("fbCopy").onclick = async () => {
 };
 $("closePicker").onclick = () => { $("pickerOverlay").hidden = true; };
 $("pickerOverlay").onclick = e => { if (e.target === $("pickerOverlay")) $("pickerOverlay").hidden = true; };
+document.addEventListener("keydown", e => { if (e.key === "Escape" && (TIP.for || !document.getElementById("itemTip")?.hidden)) { hideTip(); TIP.quiet = true; } });
 document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay", "reviewOverlay", "glossOverlay"].forEach(id => { $(id).hidden = true; }); });
 $("toastUndo").onclick = () => (toastUndo || undoBought)();
 $("toastMore").onclick = () => { const f = toastMore; toastMore = null; $("toast").hidden = true; if (f) f(); };
