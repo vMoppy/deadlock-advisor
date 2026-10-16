@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Deadlock Item Advisor</title>
+<script id="themeBoot">try { var t = JSON.parse(localStorage.getItem("dia-theme")); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
 <style>
@@ -18,12 +19,18 @@
     --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
     color-scheme: light;
   }
+  /* Dark colours: from the device setting, unless a theme was picked in the tool (v3.1.1: data-theme on <html>, set before the
+     page draws by the small script below, so a reload doesn't flash the other theme). */
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #15130f; --panel: #1e1b16; --fg: #ece5d8; --muted: #a0978a; --line: #36302a;
+    :root:not([data-theme="light"]) { --bg: #15130f; --panel: #1e1b16; --fg: #ece5d8; --muted: #a0978a; --line: #36302a;
       --accent: #e0a94a; --accent-soft: #3a2d17;
       --weapon: #e8913f; --spirit: #b18ae8; --vitality: #6cc07a;
       --good: #6cc08f; --warn: #e0a94a; --bad: #e27a6e; color-scheme: dark; }
   }
+  :root[data-theme="dark"] { --bg: #15130f; --panel: #1e1b16; --fg: #ece5d8; --muted: #a0978a; --line: #36302a;
+    --accent: #e0a94a; --accent-soft: #3a2d17;
+    --weapon: #e8913f; --spirit: #b18ae8; --vitality: #6cc07a;
+    --good: #6cc08f; --warn: #e0a94a; --bad: #e27a6e; color-scheme: dark; }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 var(--body); }
@@ -50,6 +57,8 @@
   .statline select { max-width: 100%; min-width: 0; justify-self: start; }
   @media (max-width: 380px) { .statline { grid-template-columns: 1fr; gap: 3px; } }
   .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .btn.icon { min-width: 34px; padding-inline: 8px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* "More" menu in the top bar (v3.1) */
   .more { position: relative; }
   .more > summary { list-style: none; cursor: pointer; }
@@ -306,8 +315,9 @@
   @media (max-width: 480px) { .mv-why { grid-template-columns: minmax(0, 1fr); gap: 2px; } .mv-why dd { margin-bottom: 6px; } }
   .mv-then-h { font: 700 14px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   .mv-then { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 17px; }
-  .mv-then li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
-  .mv-then .sub { grid-column: 1 / -1; font-size: 14px; color: var(--muted); display: block; padding: 0; border: 0; }
+  .mv-then li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 2px 10px; padding: 6px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+  .mv-then li > img { width: 24px; height: 24px; border-radius: 4px; }
+  .mv-then .sub { grid-column: 2 / -1; font-size: 14px; color: var(--muted); display: block; padding: 0; border: 0; }
   .mv-detail { border-top: 1px solid var(--line); padding-top: 12px; }
   /* Three-part explanation (v3.0): why this item, why now, what you'd give up. */
   .three { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; margin: 8px 0 4px; }
@@ -373,10 +383,11 @@
       <button id="clockPlus" class="btn tiny" type="button" title="The clock is behind your game: move it forward 1 minute" hidden>+1 min</button>
       <button id="clockStop" class="btn tiny" type="button" title="Stop the clock and pick the stage by hand" hidden>Stop</button>
     </span>
-    <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Match view: just the next buy and what matters now, in large type. Full view: everything.">Match view</button>
+    <button id="themeToggle" class="btn icon" type="button" aria-pressed="false" title="Switch to dark mode"><span aria-hidden="true">☾</span><span class="sr">Dark mode</span></button>
+    <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.1.1</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -386,6 +397,7 @@
         <button id="glossOpen" class="linkbtn" type="button">Glossary</button>
         <button id="notesOpen" class="linkbtn" type="button">What's new</button>
         <button id="feedbackOpen" class="linkbtn" type="button">Feedback</button>
+        <button id="themeAuto" class="linkbtn" type="button" hidden>Theme: follow my device</button>
       </div>
     </details>
   </div>
@@ -397,7 +409,7 @@
       <ol class="welcome-steps">
         <li><b>Save your Steam account</b> (below): paste your Steam profile link or type your name. It lets the tool find your matches and know which player is you. It stays in this browser.</li>
         <li><b>Leave "Statistics from" on Automatic</b>: it uses games at your rank, or your lobby's once a match is linked.</li>
-        <li><b>In a match, press Find my match</b> (or type the match ID from the bottom-right of your game screen). Everything then fills in by itself. Keep this page open on a second screen or your phone: Match view shows the next buy in large type.</li>
+        <li><b>In a match, press Find my match</b> (or type the match ID from the bottom-right of your game screen). Everything then fills in by itself. Keep this page open on a second screen or your phone: Compact mode shows the next buy in large type.</li>
       </ol>
       <p class="muted small">Nothing to install, no account to make. Other players' names and accounts are never kept.</p>
     </section>
@@ -527,7 +539,7 @@
   </div>
 
   <div id="board" hidden>
-    <section class="mod" id="matchView" aria-label="Match view">
+    <section class="mod" id="matchView" aria-label="Compact mode">
       <div id="mvAlert" class="mv-alert" role="status" aria-live="polite" hidden></div>
       <div id="mvNext"></div>
       <dl id="mvWhy" class="mv-why"></dl>
@@ -631,10 +643,14 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.1";   // shown in the top bar and written into match records
+const VERSION = "v3.1.1";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.1.1", date: "October 16, 2026", items: [
+    "Fixed: an item card no longer switches to another item when the recommendations change under your mouse. It keeps showing the item you were reading until you move away from that spot.",
+    "New: a light/dark button (☾ / ☀) in the top bar. Until you press it the tool follows your device; your choice is remembered, and More → \"Theme: follow my device\" goes back.",
+    "Match view is now called Compact mode, and its next three steps show their item pictures too."] },
   { v: "v3.1", date: "October 16, 2026", items: [
     "New: item cards. Rest the mouse on any item for a moment and a card like the game's shows what it does: price (what you'd pay with the parts you own), tier, stats, passive and active effects with their numbers and cooldowns, what grows with Spirit Power, and what it builds from and into. On a phone, tap the item: the card is in its details.",
     "Tidier top bar: Review a match, Glossary, What's new and Feedback are under More. On phones the bar no longer stays pinned over the page, and item names in lists get two lines.",
@@ -988,7 +1004,7 @@ function newerVersion(a, b) {
 }
 /* Settings carried from a downloaded copy to the web version (in the address after "#", which never leaves your
    computer): your Steam account and rank, hero, preferences and per-hero "always skip" choices. Not match records. */
-const CARRY_KEYS = ["steam", "myRank", "rank", "window", "me", "watch", "logOn", "logAuto", "skipAlways", "skipCounts", "spectates"];
+const CARRY_KEYS = ["steam", "myRank", "rank", "window", "me", "watch", "logOn", "logAuto", "skipAlways", "skipCounts", "spectates", "theme"];
 function packSettings(get) {
   const o = {}; for (const k of CARRY_KEYS) { const v = get(k); if (v != null) o[k] = v; }
   const bytes = new TextEncoder().encode(JSON.stringify(o));
@@ -5331,7 +5347,7 @@ function currentAlert(souls = soulsNow(), view = S.view) {
 function renderMatchView() {
   const on = !!S.compact && !!S.active;
   $("board").classList.toggle("compact", on);
-  const tg = $("viewToggle"); tg.hidden = !S.active; tg.textContent = on ? "Full view" : "Match view"; tg.setAttribute("aria-pressed", String(on));
+  const tg = $("viewToggle"); tg.hidden = !S.active; tg.textContent = on ? "Full view" : "Compact mode"; tg.setAttribute("aria-pressed", String(on));   // "Match view" up to v3.1 (renamed at Moppy's request)
   if (!on || !S.view) return;
   const souls = soulsNow(), order = S.view.order || [], next = order[0];
   const al = currentAlert(souls), box = $("mvAlert");
@@ -5364,6 +5380,7 @@ function renderMatchView() {
   for (const st of order.slice(1, 4)) {
     const li = document.createElement("li"), tot = st.cumulative ?? st.s.cost; li.dataset.tip = st.s.item.id;
     li.innerHTML = `<span class="nm"></span><span class="c"></span>`;
+    li.prepend(img(itemIcon(st.s.item)));   // v3.1.1: each step with its item's picture, like the next buy above
     li.querySelector(".nm").textContent = st.s.item.name;
     li.querySelector(".c").textContent = `${st.s.cost.toLocaleString()}` + (tot > souls ? ` · ${(tot - souls).toLocaleString()} more` : "");
     if (st.upgrade) { const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = `Upgrade to Tier ${st.s.item.item_tier}`; li.append(sub); }
@@ -5413,14 +5430,20 @@ function itemCardEl(it, hint = "") {
   if (hint) el.append(mk("p", "ic-hint", hint));
   return el;
 }
-const TIP = { for: null, pending: null, show: 0, hide: 0, x: -1, y: -1, quiet: false };
+/* The card belongs to the item that opened it and to the spot where it opened (v3.1.1). The board redraws as the match goes on,
+   and a different item can take that spot under a still mouse: the card keeps showing the first item until the mouse leaves the
+   spot (or the card). Up to v3.1 it followed whatever was drawn there, so it could switch from Mystic Burst to Monster Rounds while
+   being read (Moppy, October 16). TIP.open: { id, rect } of the card showing; TIP.for: the element linked to it, when still there. */
+const TIP = { for: null, open: null, pending: null, show: 0, hide: 0, x: -1, y: -1, quiet: false };
 const TIP_DELAY_MS = 300;
+const inTipArea = (x, y) => { const r = TIP.open?.rect; return !!r && x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3; };
+const tipShowing = () => !!TIP.open && !document.getElementById("itemTip")?.hidden;
 function tipBox() {
   let e = document.getElementById("itemTip");
   if (!e) {
     e = document.createElement("div"); e.id = "itemTip"; e.setAttribute("role", "tooltip"); e.hidden = true; document.body.append(e);
     e.addEventListener("pointerenter", () => clearTimeout(TIP.hide));
-    e.addEventListener("pointerleave", ev => { if (!(ev.relatedTarget && TIP.for && TIP.for.contains(ev.relatedTarget))) hideTipSoon(); });
+    e.addEventListener("pointerleave", ev => { if (!inTipArea(ev.clientX, ev.clientY)) hideTipSoon(); });
   }
   return e;
 }
@@ -5435,8 +5458,8 @@ function tipTake(t) {
   if (t.title) { t.dataset.tipTitle = t.title; t.removeAttribute("title"); }
   t.setAttribute("aria-describedby", "itemTip");
 }
-function placeTip(box, t) {
-  const r = t.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight, W = document.documentElement.clientWidth || innerWidth, H = innerHeight, g = 8;
+function placeTip(box, r) {
+  const w = box.offsetWidth, h = box.offsetHeight, W = document.documentElement.clientWidth || innerWidth, H = innerHeight, g = 8;
   let x = null, y;
   if (r.right + g + w <= W - g) x = r.right + g; else if (r.left - g - w >= g) x = r.left - g - w;
   if (x != null) y = Math.max(g, Math.min(r.top, H - h - g));
@@ -5445,23 +5468,25 @@ function placeTip(box, t) {
 }
 function showTip(t) {
   const id = t?.dataset.tip, it = S.itemById[Number(id)];
-  // Redrawn while waiting (lists redraw as the match goes on): the new copy under the pointer.
+  // Redrawn while waiting (lists redraw as the match goes on): the new copy under the pointer, if it's still the same item.
   if (t && !t.isConnected) t = TIP.x >= 0 ? document.elementFromPoint(TIP.x, TIP.y)?.closest?.("[data-tip]") : null;
   if (!it || !t || t.dataset.tip !== id) return;
   tipTake(t);
+  const r = t.getBoundingClientRect();
+  TIP.open = { id, rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom } };
   const box = tipBox();
   box.replaceChildren(itemCardEl(it, t.dataset.tipTitle || ""));
-  box.hidden = false; placeTip(box, t);
+  box.hidden = false; placeTip(box, TIP.open.rect);
 }
-function hideTip() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; const b = document.getElementById("itemTip"); if (b) b.hidden = true; tipRelease(); }
+function hideTip() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; TIP.open = null; const b = document.getElementById("itemTip"); if (b) b.hidden = true; tipRelease(); }
 function hideTipSoon() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; TIP.hide = setTimeout(hideTip, 150); }
-/* The board redraws itself as the match goes on: the card follows the new copy of the item under the pointer, or goes. */
+/* The board redrew: the card stays as it is. Its element is linked again if the same item is still under the pointer. */
 function refreshTip() {
   if (!TIP.for || TIP.for.isConnected) return;
-  const id = TIP.for.dataset.tip, under = TIP.x >= 0 ? document.elementFromPoint(TIP.x, TIP.y)?.closest?.("[data-tip]") : null;
-  TIP.for = null;
-  if (under && under.dataset.tip === id) { tipTake(under); placeTip(tipBox(), under); return; }
-  clearTimeout(TIP.hide); tipBox().hidden = true;   // a card already on its way for another item still comes
+  const id = TIP.for.dataset.tip;
+  tipRelease();
+  const under = TIP.x >= 0 ? document.elementFromPoint(TIP.x, TIP.y)?.closest?.("[data-tip]") : null;
+  if (under && under.dataset.tip === id && tipShowing()) tipTake(under);
 }
 /* The item an element belongs to, unless the pointer is on one of its buttons (Bought, Not for me: those have their own tooltip). */
 function tipFor(el) {
@@ -5475,19 +5500,23 @@ function wantTip(t) {
   if (t === TIP.pending) return;
   clearTimeout(TIP.show); clearTimeout(TIP.hide);
   TIP.pending = t;
-  TIP.show = setTimeout(() => { TIP.pending = null; showTip(t); }, TIP.for ? 120 : TIP_DELAY_MS);
+  TIP.show = setTimeout(() => { TIP.pending = null; showTip(t); }, tipShowing() ? 120 : TIP_DELAY_MS);
 }
 document.addEventListener("pointermove", e => {
   if (e.pointerType !== "mouse") return;
   if (TIP.quiet && (Math.abs(e.clientX - TIP.x) > 2 || Math.abs(e.clientY - TIP.y) > 2)) TIP.quiet = false;   // Escape holds until the mouse moves
   TIP.x = e.clientX; TIP.y = e.clientY;
   if (TIP.quiet || e.target.closest?.("#itemTip")) return;
+  // Still on the spot where the card opened: it stays, whatever is drawn there now.
+  if (tipShowing() && inTipArea(e.clientX, e.clientY)) { clearTimeout(TIP.hide); if (TIP.pending) { clearTimeout(TIP.show); TIP.pending = null; } return; }
+  if (tipShowing()) hideTipSoon();
   const t = tipFor(e.target);
   if (t) wantTip(t);   // also catches an item redrawn under a still mouse, once it moves
 }, { passive: true });
 document.addEventListener("pointerover", e => {
   if (e.pointerType !== "mouse" || TIP.quiet) return;
   if (e.target.closest?.("#itemTip")) { clearTimeout(TIP.hide); return; }
+  if (tipShowing() && inTipArea(e.clientX, e.clientY)) return;   // a redraw under a still mouse, or moving within the spot
   const t = tipFor(e.target);
   if (t) wantTip(t);
 });
@@ -5496,8 +5525,9 @@ document.addEventListener("pointerout", e => {
   const from = e.target.closest?.("[data-tip]");
   if (!from) return;
   const to = e.relatedTarget;
-  if (to && (from.contains(to) || to.closest?.("#itemTip") || (TIP.for && TIP.for.contains(to)))) return;
-  hideTipSoon();
+  if (to && (from.contains(to) || to.closest?.("#itemTip"))) return;
+  if (tipShowing() && inTipArea(e.clientX, e.clientY)) return;
+  if (tipShowing() || TIP.pending === from) hideTipSoon();
 });
 document.addEventListener("focusin", e => {
   const t = e.target.closest?.("[data-tip]");
@@ -5505,7 +5535,7 @@ document.addEventListener("focusin", e => {
   clearTimeout(TIP.show); TIP.show = setTimeout(() => { if (document.activeElement === t || t.contains(document.activeElement)) showTip(t); }, 400);
 });
 document.addEventListener("focusout", e => { if (e.target.closest?.("[data-tip]")) hideTipSoon(); });
-window.addEventListener("scroll", () => { if (TIP.for) hideTip(); }, true);
+window.addEventListener("scroll", () => { if (TIP.open || TIP.for) hideTip(); }, true);
 new MutationObserver(() => { if (TIP.for && !TIP.for.isConnected) refreshTip(); }).observe(document.documentElement, { childList: true, subtree: true });
 
 function renderDetail(entry, souls, labelText, box = $("detail")) {
@@ -6154,6 +6184,7 @@ function importCarriedSettings() {
 }
 async function init() {
   const carried = importCarriedSettings();
+  if (carried) { const t = store.get("theme"); if (t === "light" || t === "dark") applyTheme(t); }   // a theme carried over from another copy
   try {
     const [heroes, items, patches] = await Promise.all([
       getJSON("/v1/assets/heroes"),   // every hero, released or not (v2.8.1: see heroList)
@@ -6340,6 +6371,27 @@ function renderNotes() {
   box.append(more);
 }
 $("reviewOpen").onclick = () => openReview();
+/* Light or dark (v3.1.1). Until you pick, the device setting decides (as before); the button switches to the other theme and the
+   choice is remembered in this browser; "Theme: follow my device" (under More) goes back to the device setting. */
+const deviceDark = () => !!window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+function themeNow() { const t = document.documentElement.dataset.theme; return t === "light" || t === "dark" ? t : deviceDark() ? "dark" : "light"; }
+function applyTheme(t) {
+  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  store.set("theme", t === "light" || t === "dark" ? t : null);
+  renderThemeToggle();
+}
+function renderThemeToggle() {
+  const dark = themeNow() === "dark", b = $("themeToggle");
+  b.firstChild.textContent = dark ? "☀" : "☾";
+  b.lastChild.textContent = "Dark mode";   // a toggle: its name stays, aria-pressed says whether it's on
+  b.title = dark ? "Switch to light mode" : "Switch to dark mode";
+  b.setAttribute("aria-pressed", String(dark));
+  $("themeAuto").hidden = !document.documentElement.dataset.theme;
+}
+$("themeToggle").onclick = () => applyTheme(themeNow() === "dark" ? "light" : "dark");
+$("themeAuto").onclick = () => applyTheme(null);
+window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", renderThemeToggle);
+renderThemeToggle();
 // The More menu closes after a choice, a click elsewhere, or Escape.
 document.querySelectorAll("#moreMenu .linkbtn").forEach(b => b.addEventListener("click", () => { $("moreMenu").open = false; }));
 document.addEventListener("click", e => { if ($("moreMenu").open && !e.target.closest("#moreMenu")) $("moreMenu").open = false; });
