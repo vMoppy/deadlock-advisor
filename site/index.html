@@ -56,6 +56,33 @@
     background: var(--panel); color: var(--fg); font-size: 18px; line-height: 1; cursor: pointer; opacity: .55; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
   #themeToggle:hover, #themeToggle:focus-visible { opacity: 1; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* The bar shows match controls only during a match (v3.2): body[data-state] is menu, match or over. */
+  body[data-state="menu"] #soulsGroup, body[data-state="menu"] #clockGroup, body[data-state="menu"] #clearAll { display: none; }
+  body[data-state="menu"] #livePill[data-state="idle"] { display: none; }
+  .over { border-color: var(--accent); }
+  .over-list { margin: 4px 0; padding-left: 18px; display: grid; gap: 4px; }
+  .how-steps { margin: 6px 0; padding-left: 20px; display: grid; gap: 4px; }
+  /* Rank picker (v3.2) */
+  .rankpick { display: inline-flex; align-items: center; gap: 6px; justify-self: start; max-width: 100%; }
+  .rankpick .rp-caret { opacity: .7; font-size: 11px; }
+  .rank-ic { width: 20px; height: 20px; object-fit: contain; flex: none; }
+  .rp-wrap { position: relative; display: block; min-width: 0; }
+  .rp-wrap.rp-inline { display: inline-block; }
+  .rp-wrap > .rp-panel { top: 100%; left: 0; }
+  .rp-panel { position: absolute; z-index: 40; margin-top: 4px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35); padding: 6px; width: min(420px, calc(100vw - 32px)); max-height: min(70vh, 520px); overflow: auto; }
+  .rp-list { display: grid; gap: 2px; }
+  .rp-opt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: 7px; color: inherit; padding: 6px 8px; cursor: pointer; font: inherit; }
+  .rp-opt small { color: var(--muted); margin-left: auto; font-size: 11.5px; }
+  .rp-opt:hover, .rp-opt:focus-visible { background: var(--bg); border-color: var(--line); }
+  .rp-opt[aria-pressed="true"] { border-color: var(--accent); }
+  .rp-tier { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; }
+  .rp-divs { display: flex; gap: 2px; }
+  .rp-div { width: 28px; justify-content: center; padding: 5px 0; }
+  .mepick { border: 1px solid var(--accent); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+  .mepick-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mepick-teams h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .mepick-teams .rowflex { gap: 4px; }
   /* "More" menu in the top bar (v3.1) */
   .more { position: relative; }
   .more > summary { list-style: none; cursor: pointer; }
@@ -360,7 +387,7 @@
   .welcome-steps { margin: 6px 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
 </style>
 </head>
-<body>
+<body data-state="menu">
 <main>
   <p id="errNote" class="note" role="alert" hidden></p>
   <header id="header">
@@ -371,12 +398,12 @@
   <div id="bar">
     <div id="summary">Pick your hero and the enemy team to start.</div>
     <button id="livePill" class="pill" type="button" data-state="idle" title="Live match: not connected. Click to connect."><span class="pdot" aria-hidden="true"></span><span id="liveShort">Not linked</span></button>
-    <span class="group-inline">
+    <span class="group-inline" id="soulsGroup">
       <label for="souls">Souls</label>
       <input id="souls" type="number" min="0" step="100" value="0" title="Unspent souls">
       <span id="soulsSrc" class="src-tag" hidden></span>
     </span>
-    <span class="group-inline" aria-label="Match clock">
+    <span class="group-inline" id="clockGroup" aria-label="Match clock">
       <button id="clockTime" type="button" class="clockbtn" title="Match clock. Click to type the time.">--:--</button><input id="clockInput" type="text" inputmode="numeric" placeholder="m:ss" aria-label="Match time, minutes and seconds" size="5" hidden>
       <span id="stageTag"></span>
       <button id="clockStart" class="btn tiny" type="button" title="Start the match clock now (use it at 0:00 in game)">Start clock</button>
@@ -385,15 +412,15 @@
       <button id="clockStop" class="btn tiny" type="button" title="Stop the clock and pick the stage by hand" hidden>Stop</button>
     </span>
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
-    <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
+    <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.1.2</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.2</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
       <summary class="btn">More</summary>
       <div class="more-pop">
-        <button id="reviewOpen" class="linkbtn" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
+        <button id="reviewOpen" class="linkbtn" type="button" title="Look back at a finished match: your purchases next to what the tool suggested">Review a match</button>
         <button id="notesOpen" class="linkbtn" type="button">Patch notes</button>
         <button id="feedbackOpen" class="linkbtn" type="button">Feedback</button>
       </div>
@@ -405,15 +432,15 @@
       <div class="card-head"><h2 id="welcomeTitle">Welcome</h2><button id="welcomeClose" class="btn tiny" type="button">Got it</button></div>
       <p class="small">This tool suggests what to buy next in Deadlock, and explains why. Three steps to set it up:</p>
       <ol class="welcome-steps">
-        <li><b>Save your Steam account</b> (below): paste your Steam profile link or type your name. It lets the tool find your matches and know which player is you. It stays in this browser.</li>
+        <li><b>Save your Steam account</b> (below): paste your Steam profile link or type your name. It lets the tool find your matches and know which player is you. It stays in this browser. Don't know it? Skip this: connect with the match ID and pick your hero from the match, and the tool saves your account for you.</li>
         <li><b>Leave "Statistics from" on Automatic</b>: it uses games at your rank, or your lobby's once a match is linked.</li>
         <li><b>In a match, press Find my match</b> (or type the match ID from the bottom-right of your game screen). Everything then fills in by itself. Keep this page open on a second screen or your phone: Compact mode shows the next buy in large type.</li>
       </ol>
       <p class="muted small">Nothing to install, no account to make. Other players' names and accounts are never kept.</p>
     </section>
     <section class="card" id="liveSetup" aria-labelledby="liveTitle">
-      <div class="card-head"><h2 id="liveTitle">Live match</h2><span class="tag good">Automatic</span></div>
-      <p class="muted small">Fills in your hero, both teams, your lane, everyone's items and your souls, then keeps them updated while you play.</p>
+      <div class="card-head"><h2 id="liveTitle">Live match</h2><span class="tag good">Recommended</span></div>
+      <p class="muted small" id="liveIntro">Connect to the match you're playing and everything fills in by itself: your hero, both teams, your lane, everyone's items and your souls, kept up to date while you play (the broadcast runs 1 to 2 minutes behind your game). Prefer to enter things yourself? Use Manual setup below.</p>
       <ol class="steps" id="liveSteps" aria-live="polite">
         <li id="stepSteam" data-state="idle"><span class="dot" aria-hidden="true"></span><span><b>Steam account</b><span class="st-text"></span></span></li>
         <li id="stepMatch" data-state="idle"><span class="dot" aria-hidden="true"></span><span><b>Match</b><span class="st-text"></span></span></li>
@@ -421,6 +448,10 @@
         <li id="stepUpdates" data-state="idle"><span class="dot" aria-hidden="true"></span><span><b>Live updates</b><span class="st-text"></span></span></li>
       </ol>
       <p id="liveStatus" class="small muted next-line">Not linked.</p>
+      <div id="mePick" class="mepick" hidden>
+        <p class="small"><b>Which hero are you?</b> <span id="mePickNote"></span></p>
+        <div id="mePickTeams" class="mepick-teams"></div>
+      </div>
       <div class="field" id="steamEdit">
         <label for="steamInput">Your Steam account</label>
         <div class="rowflex">
@@ -435,13 +466,13 @@
       </div>
       <div id="steamResults"></div>
       <div class="statpick">
-        <div class="statline"><label for="liveRank" class="small">Statistics from</label><select id="liveRank" aria-describedby="liveStatNote"></select></div>
+        <div class="statline"><label for="liveRankPick" class="small">Statistics from</label><span class="rp-wrap"><button id="liveRankPick" class="btn rankpick" type="button" aria-haspopup="true" aria-expanded="false" aria-describedby="liveStatNote">Automatic</button><select id="liveRank" hidden aria-hidden="true" tabindex="-1"></select></span></div>
         <div class="statline"><label for="liveWindow" class="small">Matches from</label><select id="liveWindow" aria-describedby="liveStatNote"></select></div>
       </div>
       <p class="muted small" id="liveStatNote"></p>
       <div class="rowflex">
         <button id="findMatch" class="btn main big" type="button">Find my match</button>
-        <label class="check small"><input type="checkbox" id="watchNext"> Keep looking for my next match</label>
+        <label class="check small" title="Checks the game's Watch list every 20 seconds while this page is open, and connects when your next match shows up there. The Watch list only has the top 200 matches being played, so for most matches you'll still need the match ID."><input type="checkbox" id="watchNext"> Connect to my next match by itself (when the Watch list has it)</label>
       </div>
       <div class="field">
         <label for="matchId">Or connect with the match ID</label>
@@ -452,12 +483,23 @@
         </div>
       </div>
       <p id="quotaNote" class="muted small"></p>
-      <details class="note">
-        <summary>How finding your match works</summary>
-        <span><b>Find my match</b> checks the in-game Watch list for your Steam account. That list only holds the top 200 matches being played, so most matches aren't in it. When yours isn't, type the match ID shown in the bottom-right corner of your screen once the match has loaded, then press Connect.</span>
-        <span>Connecting uses one of the 6 match connections the data service allows per hour (failed tries count too). Reconnecting to the same match within an hour is free.</span>
-        <span>Live data comes from the match broadcast, which runs about 1 to 2 minutes behind your game. It shows what the scoreboard shows: heroes, teams, lanes, items and souls.</span>
-        <span><b>Keep looking for my next match</b> checks the Watch list every 20 seconds while this page is open and connects by itself when your match shows up. It only helps for matches in the Watch list.</span>
+      <details class="note" id="liveHow">
+        <summary>How to connect, step by step</summary>
+        <ol class="small how-steps">
+          <li>Start your match in Deadlock and wait until it has loaded.</li>
+          <li>Press <b>Find my match</b>. It looks for your Steam account in the game's Watch list, which only holds the top 200 matches being played, so yours often isn't there.</li>
+          <li>Not found? The match ID is the long number in the bottom-right corner of your game screen. Type it under <b>Or connect with the match ID</b> and press <b>Connect</b>.</li>
+          <li>No Steam account saved? Connect with the match ID anyway: the tool lists the heroes in the match and you pick yours. It then saves your Steam account (only yours) for next time.</li>
+          <li>When the match ends, the tool says so and offers a review of your purchases.</li>
+        </ol>
+        <details class="note">
+          <summary>If it doesn't work</summary>
+          <span><b>"Not found in the Watch list":</b> normal for most matches. Use the match ID.</span>
+          <span><b>"Your Steam account isn't in this match":</b> check the match ID (it changes every match) and the saved account (Change, above).</span>
+          <span><b>Nothing arrives for a minute or two:</b> the broadcast starts a little after the match does, and runs 1 to 2 minutes behind. The tool keeps trying by itself.</span>
+          <span><b>Connection limit:</b> the data service allows 6 new match connections per hour (failed tries count too). Reconnecting to the same match within an hour is free.</span>
+          <span><b>Still stuck?</b> Manual setup below works without any connection.</span>
+        </details>
       </details>
       <div class="rowflex"><button id="liveReport" class="btn tiny" type="button" hidden>Show live data details</button></div>
       <details id="liveDiag" class="note" hidden><summary>Technical details</summary>
@@ -467,8 +509,8 @@
     </section>
 
     <section class="card" id="manualSetup" aria-labelledby="manualTitle">
-      <div class="card-head"><h2 id="manualTitle">Manual setup</h2><span class="tag">Fallback and corrections</span></div>
-      <p class="muted small" id="manualNote">Use this without a live match, or to correct something. With a live match these fill in by themselves, and anything you change is marked as your change.</p>
+      <div class="card-head"><h2 id="manualTitle">Manual setup</h2><span class="tag">No connection needed</span></div>
+      <p class="muted small" id="manualNote">Pick the heroes yourself and type your souls as you go. Use it when you can't connect, or to correct something: with a live match these fill in by themselves, and anything you change is marked as your change.</p>
       <div class="sub">
         <div class="step-head"><span class="step-num">1</span><h3>Your hero</h3><span id="heroSource" class="src muted small">Remembered for next time</span></div>
         <input id="heroSearch" type="search" placeholder="Search heroes…" aria-label="Search your hero">
@@ -493,11 +535,12 @@
         </div>
         <p class="muted small" id="phaseNote">The match clock starts when you press Get recommendations (at the stage picked here). The stage then follows the clock, blending gradually around 9 and 20 minutes.</p>
         <div class="rowflex">
-          <label for="rankRange">Statistics from</label>
-          <select id="rankRange">
+          <label for="rankPick">Statistics from</label>
+          <span class="rp-wrap rp-inline"><button id="rankPick" class="btn rankpick" type="button" aria-haspopup="true" aria-expanded="false">Automatic</button>
+          <select id="rankRange" hidden aria-hidden="true" tabindex="-1">
             <option value="auto">Automatic: this match's lobby, or your own rank</option>
             <option value="all">All ranks (most games, least precise)</option>
-          </select>
+          </select></span>
           <label for="window">Matches from</label>
           <select id="window">
             <option value="patch">Since the latest patch</option>
@@ -532,9 +575,33 @@
       <p class="small ok-text" id="logSaved" role="status"></p>
       <p class="muted small" id="logWhere" hidden></p>
       <label class="check small" id="logAutoRow" hidden><input type="checkbox" id="logAuto" checked> Update this file by itself when each match ends</label>
+      <label class="check small"><input type="checkbox" id="logOffer" checked> When a match ends, offer to save its record</label>
       </details>
     </section>
   </div>
+
+  <!-- v3.2: what happens when a match ends, and what to do next (Moppy and first-time players: the end of a match felt abrupt). -->
+  <section class="card over" id="matchOver" role="status" aria-labelledby="moTitle" hidden>
+    <div class="card-head"><h2 id="moTitle">Match over</h2><button id="moHide" class="linkbtn small" type="button" title="Hide this until the next match ends">Hide</button></div>
+    <p id="moText"></p>
+    <div class="rowflex">
+      <button id="moReview" class="btn main" type="button">Review this match</button>
+      <button id="moSave" class="btn" type="button">Save the match record</button>
+      <button id="moReconnect" class="btn" type="button" hidden>Still playing? Reconnect</button>
+      <button id="moNext" class="btn" type="button">Next match</button>
+    </div>
+    <ul class="small over-list">
+      <li><b>Review this match:</b> each of your purchases next to what the tool suggested at that moment, and anything worth a look (souls left unspent, items sold at a loss, items bought late). The match details reach the data service up to an hour after the match.</li>
+      <li id="moSaveLi"><b>Save the match record:</b> a small file of what the tool saw and suggested, with no names or Steam accounts. Attach it to a Feedback report and it helps improve the recommendations. Nothing is shared unless you send it.</li>
+      <li><b>Next match:</b> clears this match (your Steam account and settings stay) and takes you back to the start.</li>
+    </ul>
+    <div class="field" id="moNoteRow">
+      <label for="moNote">Anything the tool got wrong or right? (optional, kept in the record)</label>
+      <input id="moNote" type="search" autocomplete="off" placeholder="For example: it kept suggesting Healbane, but nobody on their team healed">
+    </div>
+    <label class="check small" id="moOfferRow"><input type="checkbox" id="moOfferOff"> Don't offer to save records after matches (you can still save them under Match records)</label>
+    <p class="small ok-text" id="moSaved" role="status"></p>
+  </section>
 
   <div id="board" hidden>
     <section class="mod" id="matchView" aria-label="Compact mode">
@@ -583,10 +650,11 @@
     <div id="notesBody" class="scroll"></div>
   </div>
 </div>
+<div id="rankPanel" class="rp-panel" role="dialog" aria-label="Statistics from: pick a rank" hidden></div>
 <div id="reviewOverlay" class="overlay" hidden>
   <div class="sheet review" role="dialog" aria-labelledby="reviewTitle">
     <div class="mod-head"><h2 id="reviewTitle">Match review</h2><button id="reviewClose" class="btn" type="button">Close</button></div>
-    <p class="small muted">Your purchases in a finished match next to what the tool suggested at each moment, and anything worth a look: souls left unspent, sales at a loss, items bought late. Works from about an hour after a match ends.</p>
+    <p class="small muted">Look back at a finished match: each of your purchases next to what the tool suggested at that moment, and what's worth a look (souls left unspent, items sold at a loss, items bought late). It needs the match ID (your last match's is filled in) and your Steam account, to find you in the match. Match details reach the data service up to an hour after the match ends.</p>
     <div class="rowflex"><label for="reviewMatch" class="small">Match ID</label><input id="reviewMatch" type="search" inputmode="numeric" autocomplete="off" placeholder="For example 117143518"><button id="reviewGo" class="btn main" type="button">Review</button></div>
     <p id="reviewStatus" class="small muted" role="status"></p>
     <div id="reviewBody" class="scroll"></div>
@@ -635,10 +703,16 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.1.2";   // shown in the top bar and written into match records
+const VERSION = "v3.2";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.2", date: "October 16, 2026", items: [
+    "When a match ends, a Match over card replaces the message that disappeared: Review this match, Save the match record (only if you press it; you can turn the offer off), Still playing? Reconnect, and Next match.",
+    "No Steam account saved? Connect with the match ID, pick your hero from the heroes in the match, and the tool saves your account (only yours) for next time.",
+    "The start screen explains Live match (recommended) and Manual setup, and how to connect step by step. The top bar shows souls, the clock and New match only during a match. Setup is now Match setup.",
+    "Why now gives a reason (an upgrade that costs only the difference, a step toward an upgrade, worth saving for, best bought early), and Counters say what they counter: Direct counter, General defence, or wins more vs a hero (+2.1%).",
+    "Statistics from is a list with each rank's icon, its familiar name (Sentinel is Bronze) and its 6 divisions, so you can pick lobbies around Sentinel · Division 5."] },
   { v: "v3.1.2", date: "October 16, 2026", items: [
     "Compact mode: every step has a Skip button now, not only the next buy, and an item's card opens right next to it.",
     "Item cards stay inside their own panel: a card from the middle list no longer covers the item details on the right.",
@@ -1493,9 +1567,9 @@ function timingFor(flowItem, sec, invest, matchLen, { tier = null, tierShare = n
     const best = avail.reduce((a, c) => cols[c].lift > cols[a].lift ? c : a, avail[0]);
     const here = cur ? cur.lift : null;
     if (best < k && (here == null || cols[best].lift - here >= TIMING_GAP)) {
-      t.kind = "early"; t.note = `Does best bought early: ${pts(cols[best].raw)} pts at ${FLOW_COLS[best]}` + (here != null ? `, ${pts(cur.raw)} at ${FLOW_COLS[k]}` : `; few players buy it as late as now`) + ".";
+      t.kind = "early"; t.note = `Does best bought early: ${pts(cols[best].raw)}% win rate at ${FLOW_COLS[best]}` + (here != null ? `, ${pts(cur.raw)}% at ${FLOW_COLS[k]}` : `; few players buy it as late as now`) + ".";
     } else if (best > k && here != null && cols[best].lift - here >= TIMING_GAP) {
-      t.kind = "later"; t.note = `Does better later: ${pts(cur.raw)} pts at ${FLOW_COLS[k]}, ${pts(cols[best].raw)} at ${FLOW_COLS[best]}.`;
+      t.kind = "later"; t.note = `Does better later: ${pts(cur.raw)}% win rate at ${FLOW_COLS[k]}, ${pts(cols[best].raw)}% at ${FLOW_COLS[best]}.`;
     }
   }
   // Rarely bought at this stage (well under the usual share of purchases), or hardly at all: its value
@@ -1937,6 +2011,23 @@ function spentOn(owned, itemById) { let s = 0; for (const id of owned) s += item
 const TAG_NAMES = { sustain: "healing", antiheal: "healing reduction", cc: "crowd control", cleanse: "debuff protection",
   bulletRes: "bullet resist", spiritRes: "spirit resist", bulletShred: "bullet resist reduction", spiritShred: "spirit resist reduction", aura: "aura", invest: "builds value over time",
   debuffRes: "debuff resist", slowRes: "slow resist", slow: "slows" };
+
+/* How directly a counter answers this enemy team (v3.2), for its explanation. "direct": it answers something the enemies
+   actually have (their items or abilities, from the match: mechWhy). "defence": general protection (health, resist,
+   healing, debuff protection) that players do better with against these enemies. "stats": the statistics alone say it
+   does better against them. Moppy's October 16 feedback: the Counters tab showed numbers without saying what's countered. */
+const DEFENCE_TAGS = ["bulletRes", "spiritRes", "cleanse", "debuffRes", "slowRes"];
+function counterHow(s, tags) {
+  if (s?.mechWhy?.length) return "direct";
+  const it = s?.item || {}, P = it.properties || {};
+  // Health counts when it's a main part of the item (many weapon items add a little: Headshot Booster +30, Bullet Lifesteal +90).
+  const hp = parseFloat(P.BonusHealth?.value) || 0, regen = parseFloat(P.BonusHealthRegen?.value) || 0;
+  const guard = hp >= 0.15 * (it.cost || 800) || regen >= 1 || Object.entries(P).some(([k, v]) => /Shield|Barrier/i.test(k) && !/Damage|Reduction|Penalty|Duration|Cooldown/i.test(k) && parseFloat(v?.value) > 0);
+  // Healing counts (regen, heals); lifesteal alone doesn't: it comes from dealing damage.
+  // Vitality items only: weapon and spirit items often carry a little resist or health on the side (Silencer, Weighted Shots).
+  if (it.item_slot_type && it.item_slot_type !== "vitality") return "stats";
+  return guard || DEFENCE_TAGS.some(t => tags?.has(t)) || (tags?.has("sustain") && healTraits(it).heals) ? "defence" : "stats";
+}
 
 /* What an item does, for the match-aware layer. From v2.8.4 the game's own stat names decide where they exist (Deadlock
    calls spirit "Tech" and bullet resist "Armor"), and the description only adds what it says plainly. Up to v2.8.3 broad
@@ -3034,12 +3125,15 @@ const MIN_BRACKET_GAMES = 300;    // biggest single sample below this -> widen
 const MAX_WIDEN = 3;
 const LOBBY_MIN_RANKED = 4;       // a lobby average needs at least 4 players with a known rank
 const RANK_MAX_AGE_S = 90 * 86400;   // a rank from a ranked match older than this isn't counted
+const RANK_DIV_HALF = 5;          // one rank and division picked by hand: half a tier either side
 function tierLabel(t) { const r = (S.ranks || []).find(x => x.tier === t); return r ? r.name : `Rank tier ${t}`; }
 function rankName(badge) {
   if (!badge) return "unranked";
   const tier = Math.floor(badge / 10), sub = Math.min(6, Math.max(1, badge % 10));
   return `${tierLabel(tier)} ${sub}`;
 }
+/* "Sentinel · Division 5" (v3.2, Moppy's format for the rank picker). */
+function rankDivName(badge) { const tier = Math.floor(badge / 10), sub = Math.min(6, Math.max(1, badge % 10)); return `${tierLabel(tier)} · Division ${sub}`; }
 function rangeLabel(lo, hi) { return lo <= 0 && hi >= 116 ? "all ranks" : `${rankName(Math.max(lo, 11))} to ${rankName(Math.min(hi, 116))}`; }
 function rankChoice() {
   const v = $("rankRange").value, w = (S.rankWiden || 0) * 10;
@@ -3048,6 +3142,11 @@ function rankChoice() {
   if (v === "all") return { lo: 0, hi: 116, src: "all", label: "all ranks" };
   // Still too few games after widening three times (a hero released days ago, or rarely played): every rank (v2.8.6).
   if ((S.rankWiden || 0) > MAX_WIDEN) return { lo: 0, hi: 116, src: "widened", label: "all ranks (too few games at your rank)" };
+  const bm = /^b(\d+)$/.exec(v);
+  if (bm) {
+    const b = +bm[1], [lo, hi] = wide(b - RANK_DIV_HALF, b + RANK_DIV_HALF);
+    return { lo, hi, src: "division", centre: b, label: `lobbies around ${rankDivName(b)} (${rangeLabel(lo, hi)}${note})` };
+  }
   const m = /^t(\d+)$/.exec(v);
   if (m) {
     const t = +m[1], [lo, hi] = wide(t * 10 + 1, t * 10 + 6);
@@ -3065,10 +3164,10 @@ function rankBounds() { const c = rankChoice(); return [c.lo, c.hi]; }
    Moppy's records (October 15) "Seeker lobbies" was set while the lobby averaged Ritualist. Said in the rank notes, and once
    per match as a message with a button to switch to Automatic. Nothing changes by itself: a hand-picked rank is a choice. */
 function rankMismatch() {
-  const m = /^t(\d+)$/.exec($("rankRange")?.value || ""), lob = LIVE.id && LIVE.lobby && LIVE.lobby.n >= LOBBY_MIN_RANKED ? LIVE.lobby : null;
+  const m = /^([tb])(\d+)$/.exec($("rankRange")?.value || ""), lob = LIVE.id && LIVE.lobby && LIVE.lobby.n >= LOBBY_MIN_RANKED ? LIVE.lobby : null;
   if (!m || !lob || lob.avg == null) return null;
-  const t = +m[1], lt = Math.floor(Math.round(lob.avg) / 10);
-  return Math.abs(lt - t) >= 2 ? `This match's lobby averages ${rankName(Math.round(lob.avg))}, but the statistics are set to ${tierLabel(t)} lobbies. Automatic would use this lobby's rank.` : null;
+  const t = m[1] === "t" ? +m[2] : Math.floor(+m[2] / 10), lt = Math.floor(Math.round(lob.avg) / 10);
+  return Math.abs(lt - t) >= 2 ? `This match's lobby averages ${rankName(Math.round(lob.avg))}, but the statistics are set to ${m[1] === "t" ? tierLabel(t) : rankDivName(+m[2])} lobbies. Automatic would use this lobby's rank.` : null;
 }
 function rankMismatchToast() {
   const msg = rankMismatch();
@@ -3091,7 +3190,8 @@ function renderRankNote() {
     none: "No rank known yet, so statistics come from all ranks. Save your Steam account or link a match to narrow them down.",
     all: "Statistics from every rank: the most games, but the least specific to your lobbies." + allRanksHint(),
     widened: `Statistics from every rank: even widened three times, there were too few games for ${S.me ? heroName(S.me) : "this hero"} near your rank (usually a hero released in the last few days). It narrows again when you change the rank setting or start a new match.`,
-    tier: `Statistics from matches where the lobby averaged ${c.label.replace(/ lobbies.*/, "")}${S.rankWiden ? `, widened to ${rangeLabel(c.lo, c.hi)} because there were few games at that rank` : ""}.`
+    tier: `Statistics from matches where the lobby averaged ${c.label.replace(/ lobbies.*/, "")}${S.rankWiden ? `, widened to ${rangeLabel(c.lo, c.hi)} because there were few games at that rank` : ""}.`,
+    division: `Statistics from lobbies around ${rankDivName(c.centre)}: ${rangeLabel(c.lo, c.hi)}${S.rankWiden ? ", widened because there were few games at that rank" : ""}.`
   }[c.src];
   const mm = rankMismatch();
   $("rankNote").textContent = t + (mm ? " " + mm : "") + (S.ranksSource === "fallback" ? " (Rank names couldn't be loaded, so tiers are numbered.)" : "");
@@ -3109,6 +3209,7 @@ function syncStatControls() {
     }
     m.value = o.value;
   }
+  renderRankPickers();
   const c = rankChoice(), win = timeWindow();
   const note = $("liveStatNote");
   if (note) note.textContent = `Using ${c.label}, ${win.label}.`
@@ -3131,14 +3232,103 @@ function rankChanged() {
 }
 /* Rank tiers and names from the game data. Kept on this computer as a fallback; without either, tiers are numbered. */
 function populateRanks(list, source) {
-  S.ranks = (list || []).filter(r => r && r.tier >= 1 && r.tier <= 11 && r.name).map(r => ({ tier: r.tier, name: r.name })).sort((a, b) => a.tier - b.tier);
+  S.ranks = (list || []).filter(r => r && r.tier >= 1 && r.tier <= 11 && r.name).map(r => ({ tier: r.tier, name: r.name, images: r.images || {}, color: r.color || null })).sort((a, b) => a.tier - b.tier);
   S.ranksSource = S.ranks.length ? source : "fallback";
   if (!S.ranks.length) S.ranks = Array.from({ length: 11 }, (_, i) => ({ tier: i + 1, name: `Rank tier ${i + 1}` }));
   const sel = $("rankRange"), keep = sel.value;
-  [...sel.options].filter(o => /^t\d+$/.test(o.value)).forEach(o => o.remove());
+  [...sel.options].filter(o => /^[tb]\d+$/.test(o.value)).forEach(o => o.remove());
   for (const r of S.ranks) { const o = document.createElement("option"); o.value = "t" + r.tier; o.textContent = `${r.name} lobbies`; sel.append(o); }
+  // One rank and division (v3.2, the rank picker): lobbies around it.
+  for (const r of S.ranks) for (let d = 1; d <= 6; d++) { const o = document.createElement("option"); o.value = "b" + (r.tier * 10 + d); o.textContent = `${rankDivName(r.tier * 10 + d)} lobbies`; sel.append(o); }
   sel.value = [...sel.options].some(o => o.value === keep) ? keep : "auto";
+  renderRankPickers();
 }
+/* The rank picker (v3.2): a browser's own dropdown can't show pictures, so "Statistics from" is a button that opens a list of
+   the ranks with their icons (from the game data) and divisions: Automatic, All ranks, a whole rank, or one rank and division
+   ("Sentinel · Division 5"). The select underneath (#rankRange) still holds the setting. Moppy's October 16 feedback. */
+function rankImg(tier, sub) {
+  const im = (S.ranks || []).find(x => x.tier === tier)?.images || {};
+  const url = (sub ? im[`small_subrank${sub}_webp`] || im[`small_subrank${sub}`] : null) || im.small_webp || im.small || im.large_webp || im.large || im[`small_subrank6_webp`] || "";
+  return /^https:\/\//.test(url) ? url : "";
+}
+function rankIcon(tier, sub, size = 20) {
+  const url = rankImg(tier, sub);
+  if (!url) return null;
+  const img = document.createElement("img"); img.src = url; img.alt = ""; img.width = img.height = size; img.loading = "lazy"; img.className = "rank-ic";
+  img.onerror = () => img.remove();
+  return img;
+}
+/* What the button shows for the current setting: an icon (or none) and words. */
+function rankPickModel(v = $("rankRange").value) {
+  const b = /^b(\d+)$/.exec(v), t = /^t(\d+)$/.exec(v);
+  if (b) { const x = +b[1], al = rankAlias(Math.floor(x / 10)); return { tier: Math.floor(x / 10), sub: x % 10, text: rankDivName(x), title: al ? `${tierLabel(Math.floor(x / 10))} is ${al}` : "" }; }
+  if (t) { const al = rankAlias(+t[1]); return { tier: +t[1], sub: null, text: `${tierLabel(+t[1])}${al ? " (" + al + ")" : ""}, every division` }; }
+  if (v === "all") return { tier: null, text: "All ranks" };
+  const c = rankChoice();
+  return c.centre ? { tier: Math.floor(c.centre / 10), sub: c.centre % 10, text: `Automatic · ${rankDivName(c.centre)}` } : { tier: null, text: "Automatic" };
+}
+const RANK_PICKERS = [["rankPick", "rankRange"], ["liveRankPick", "liveRank"]];
+/* The familiar ladder names the game shows under its first eight ranks (Moppy, October 16, from the game's "What is Ranked?"
+   screen; the data service doesn't provide them). Keyed by the rank's name, so a renamed rank simply shows no second name. */
+const RANK_ALIAS = { Initiate: "Brick", Seeker: "Stone", Acolyte: "Iron", Sentinel: "Bronze", Mystic: "Silver", Ritualist: "Gold", Emissary: "Platinum", Oracle: "Diamond" };
+const rankAlias = tier => RANK_ALIAS[tierLabel(tier)] || "";
+function renderRankPickers() {
+  if (typeof document === "undefined") return;
+  const m = rankPickModel();
+  for (const [id] of RANK_PICKERS) {
+    const btn = $(id); if (!btn) continue;
+    const ic = m.tier != null ? rankIcon(m.tier, m.sub) : null, label = document.createElement("span");
+    label.textContent = m.text;
+    const caret = document.createElement("span"); caret.className = "rp-caret"; caret.setAttribute("aria-hidden", "true"); caret.textContent = "▾";
+    btn.replaceChildren(...[ic, label, caret].filter(Boolean));
+    btn.setAttribute("aria-label", `Statistics from: ${m.text}${m.title ? " (" + m.title + ")" : ""}. Change`);
+    btn.title = m.title || "";
+  }
+  const panel = $("rankPanel"); if (panel && !panel.hidden) fillRankPanel();
+}
+function fillRankPanel() {
+  const panel = $("rankPanel"), cur = $("rankRange").value;
+  const opt = (v, main, sub, ic) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "rp-opt"; b.dataset.v = v; b.setAttribute("aria-pressed", String(cur === v));
+    const t = document.createElement("span"); t.textContent = main; if (ic) b.append(ic); b.append(t);
+    if (sub) { const sm = document.createElement("small"); sm.textContent = sub; b.append(sm); }
+    return b;
+  };
+  const list = document.createElement("div"); list.className = "rp-list";
+  list.append(opt("auto", "Automatic", "This match's lobby, or your own rank (recommended)"), opt("all", "All ranks", "The most games, least specific to you"));
+  for (const r of S.ranks || []) {
+    const row = document.createElement("div"); row.className = "rp-tier";
+    const name = opt("t" + r.tier, r.name, RANK_ALIAS[r.name] || "", rankIcon(r.tier, null, 22)); name.classList.add("rp-name");
+    name.title = `${r.name}${RANK_ALIAS[r.name] ? " (" + RANK_ALIAS[r.name] + ")" : ""}, every division`;
+    const divs = document.createElement("div"); divs.className = "rp-divs"; divs.setAttribute("role", "group"); divs.setAttribute("aria-label", `${r.name} divisions`);
+    for (let d = 1; d <= 6; d++) { const b = opt("b" + (r.tier * 10 + d), String(d)); b.classList.add("rp-div"); b.title = rankDivName(r.tier * 10 + d) + (RANK_ALIAS[r.name] ? ` (${RANK_ALIAS[r.name]} ${d})` : ""); b.setAttribute("aria-label", rankDivName(r.tier * 10 + d)); divs.append(b); }
+    row.append(name, divs); list.append(row);
+  }
+  panel.replaceChildren(list);
+}
+function openRankPanel(btn) {
+  const panel = $("rankPanel");
+  if (!panel.hidden && panel.dataset.from === btn.id) { closeRankPanel(); return; }
+  panel.dataset.from = btn.id; fillRankPanel(); panel.hidden = false;
+  btn.after(panel); btn.setAttribute("aria-expanded", "true");
+  // Kept inside the window (a phone's narrow screen): moved left by what would stick out.
+  panel.style.left = "";
+  const r = panel.getBoundingClientRect?.(), room = (document.documentElement.clientWidth || innerWidth) - 8;
+  if (r && r.right > room) panel.style.left = `${Math.min(0, -(r.right - room))}px`;
+  (panel.querySelector('[aria-pressed="true"]') || panel.querySelector("button"))?.focus?.();
+}
+function closeRankPanel(focusBack) {
+  const panel = $("rankPanel"); if (!panel || panel.hidden) return;
+  panel.hidden = true;
+  const btn = $(panel.dataset.from || ""); btn?.setAttribute("aria-expanded", "false");
+  if (focusBack) btn?.focus?.();
+}
+function pickRank(v) {
+  closeRankPanel(true);
+  if (!v || v === $("rankRange").value) return;
+  $("rankRange").value = v; $("rankRange").onchange();
+}
+
 /* Ranks of players, from their latest ranked match (/v1/players/rank, 20 requests a minute). */
 async function fetchRanks(accountIds) {
   const rows = await getJSON(`/v1/players/rank?account_ids=${accountIds.join(",")}`);
@@ -3568,6 +3758,8 @@ function lobbyText() {
 }
 function renderLive() {
   if (!$("stepSteam")) return;
+  renderAppState();
+  renderMePick();
   const now = Date.now(), L = LIVE;
   // 1. Steam account
   if (S.steam) setStep("stepSteam", "ok", `${S.steam.name || "Account " + S.steam.accountId} (account ${S.steam.accountId})`);
@@ -4163,12 +4355,67 @@ function matchEnded(how) {
   S.endedMatchId = LIVE.id; LIVE.endHow = how;
   logEvent("end", { how }); logClose(how === "confirmed" ? "match ended" : "broadcast stopped");
   LIVE.rosterState = { state: "ended", text: how };
-  const rec = LOG.on ? " Its record is kept under Setup → Match records." : "", watch = S.watch ? " Watching for your next match." : "";
+  const rec = LOG.on ? " Its record is kept under Match setup → Match records." : "", watch = S.watch ? " Watching for your next match." : "";
   liveStatus(how === "confirmed" ? "The match has ended. Live link finished." + rec + watch
     : "The live broadcast stopped and didn't come back, so the match has probably ended. Still playing? Press Connect to reconnect (free for the same match); anything you mark by hand is kept." + rec + watch, "muted");
   renderLive(); renderSources();
   // The post-match review (v2.9). The match details usually arrive within the hour; the review says so if they haven't yet.
-  showToast("The match has ended. Review your purchases?", { more: () => openReview(String(S.endedMatchId)), moreLabel: "Review" });
+  // v3.2: the Match over card (above the board) replaces the toast that offered the review.
+  S.overHidden = null; renderAppState();
+}
+
+/* ---------- App state (v3.2) ----------
+   menu: the start screen (no match yet); match: recommendations showing; over: the live match has ended (the board stays, with
+   the Match over card above it). The top bar shows the souls, the clock and New match only during a match (CSS on body[data-state]).
+   Moppy's October 16 feedback: first-time players saw match controls before they had a match, and the end of a match was a toast
+   that disappeared. */
+function appState() {
+  if (!S.active) return "menu";
+  return LIVE.rosterState?.state === "ended" && S.endedMatchId ? "over" : "match";
+}
+/* The ended match's newest record (after a probable end the tool keeps recording in case you're still playing). */
+function endedRecord() { return [...LOG.records].reverse().find(r => String(r.matchId) === String(S.endedMatchId)) || LOG.records[LOG.records.length - 1]; }
+function offerSave() { return store.get("offerSave") !== false; }
+function renderAppState() {
+  if (typeof document === "undefined" || !$("matchOver")) return;
+  const st = appState();
+  document.body.dataset.state = st;
+  const box = $("matchOver"), show = st === "over" && $("setup").hidden && String(S.overHidden) !== String(S.endedMatchId);
+  box.hidden = !show;
+  if (!show) return;
+  const probable = LIVE.endHow !== "confirmed";
+  $("moTitle").textContent = probable ? "The match has probably ended" : "Match over";
+  const watch = S.watch ? " The tool is watching for your next match and connects by itself when it starts." : "";
+  $("moText").textContent = (probable
+    ? "The live broadcast stopped and didn't come back. If you're still in the match, press Still playing? Reconnect (it's free for the same match)."
+    : "The game reported the end of the match, so the live link has finished.") + watch;
+  $("moReconnect").hidden = !probable;
+  const rec = endedRecord();
+  const canSave = LOG.on && !!rec;
+  $("moSave").hidden = $("moSaveLi").hidden = !canSave || !offerSave();
+  $("moNoteRow").hidden = !canSave;
+  $("moOfferRow").hidden = !canSave;
+  $("moOfferOff").checked = !offerSave();
+  if (document.activeElement !== $("moNote")) $("moNote").value = rec?.note || "";
+}
+/* Clear everything for the next match (your Steam account and settings stay). Also New match's second tap. */
+function newMatch() {
+  disarmClear();
+  logClose("new match");
+  S.me = null; store.set("me", null);
+  S.enemies = []; S.lane = new Set(); S.owned = new Set(); S.clockStart = null; S.clockStartedOnce = false; S.soulOffset = 0; S.lastSouls = null;
+  $("buildSearch").value = ""; renderBuildSearch();
+  S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = []; S.soulsRef = null; S.selected = null; S.tab = null; S.view = null; S.cache = {}; S.pending = []; S.windowFrom = null;
+  unlinkMatch(true); cancelLinkRetry(); $("matchId").value = ""; liveDiag(""); liveStatus("Cleared for a new match. Press Find my match once you're in the game, or set things up by hand.");
+  $("souls").value = 0; setPhase("lane");
+  // Your rank and period choices stay (v2.7.4): they're picked before finding a match, not per match.
+  S.rankWiden = 0; $("window").value = windowDefault(); renderRankNote();
+  ["heroSearch", "enemySearch", "itemSearch"].forEach(id => $(id).value = "");
+  S.slot = "all"; $("slotFilter").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.slot === "all"));
+  $("pickerOverlay").hidden = true; $("toast").hidden = true; undoState = null;
+  S.lastMatchId = null; S.endedMatchId = null; S.overHidden = null; S.clockAdjust = 0; S.handEnemies = false; LIVE.matchErr = null; $("moSaved").textContent = "";
+  showBoard(false);
+  saveMatch(); renderAll(); tickClock(); renderLive(); window.scrollTo(0, 0);
 }
 function startGameOverStream() {
   const c = LIVE.cols;
@@ -4532,8 +4779,51 @@ function identifyMe() {
   if (S.me && LIVE.roster.has(S.me)) return { hero: S.me, how: "hero" };
   if (!fullRoster) return { wait: true };
   const names = [...LIVE.roster.keys()].map(h => S.heroById[h].name).join(", ");
-  return { error: S.me ? `${S.heroById[S.me].name} isn't in this match (heroes here: ${names}). Save your Steam account, or pick your hero.`
-    : `Save your Steam account (or pick your hero) so the tool knows which player you are. Heroes here: ${names}.` };
+  return { error: S.me ? `${S.heroById[S.me].name} isn't in this match. Which hero are you? Pick yours below (heroes here: ${names}).`
+    : `Connected. Which hero are you? Pick yours below so the tool knows which player you are (heroes here: ${names}).` };
+}
+
+/* "Which hero are you?" (v3.2). Connected by match ID with no Steam account saved and no hero picked that's in the match:
+   the heroes in the match are listed and you pick yours. If the broadcast has that player's Steam account, it's saved as
+   yours (only yours: the others are never kept), so Find my match works next time. Moppy's October 16 feedback: new players
+   didn't know their Steam ID, and the error asked them to find it first. */
+function mePickList() {
+  if (!LIVE.id || S.steam || LIVE.meHow || !LIVE.dataErr || LIVE.roster.size < 2) return null;
+  return [...LIVE.roster].map(([hero, p]) => ({ hero, team: String(p.team), account: p.account ?? null }))
+    .filter(x => S.heroById[x.hero]).sort((a, b) => a.team.localeCompare(b.team) || heroName(a.hero).localeCompare(heroName(b.hero)));
+}
+function renderMePick() {
+  const box = $("mePick"); if (!box) return;
+  const list = mePickList(); box.hidden = !list;
+  if (!list) return;
+  const sig = list.map(x => x.hero + ":" + x.team).join(",");
+  $("mePickNote").textContent = list.some(x => x.account)
+    ? "Pick yours to start. The tool then saves your Steam account from the match (no one else's), so Find my match works next time."
+    : "Pick yours to start.";
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  const teams = [...new Set(list.map(x => x.team))], wrap = $("mePickTeams"); wrap.replaceChildren();
+  teams.forEach((t, i) => {
+    const col = document.createElement("div"), h = document.createElement("h4"), row = document.createElement("div");
+    h.textContent = teams.length === 2 ? (i ? "Other team" : "One team") : "Heroes"; row.className = "rowflex";
+    for (const x of list.filter(y => y.team === t)) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn tiny"; b.textContent = heroName(x.hero); b.dataset.hero = x.hero;
+      b.onclick = () => pickMe(x.hero); row.append(b);
+    }
+    col.append(h, row); wrap.append(col);
+  });
+}
+async function pickMe(hero) {
+  const p = LIVE.roster.get(hero); if (!p) return;
+  // Your hero first (the same as picking it under Manual setup): it identifies you if the broadcast itself has no Steam IDs.
+  S.me = hero; store.set("me", hero); loadCurve(); S.matchupKey = null; S.prevOrder = []; LIVE.dataErr = null;
+  if (p.account) {
+    const rows = await getJSON(`/v1/players/steam?account_ids=${p.account}`).catch(() => []);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    saveSteam(row ? { account_id: p.account, personaname: row.personaname } : { account_id: p.account });   // applies the roster too
+    liveStatus(`You're ${heroName(hero)}. Saved your Steam account${row?.personaname ? " (" + row.personaname + ")" : ""} from the match for next time; Change, above, undoes it.`, "ok");
+  } else applyRoster();
+  renderLive();
 }
 
 /* Turn the roster into your hero, the enemy team and your build. Team changes from the match only
@@ -4628,7 +4918,7 @@ function renderSources() {
   $("buildSource").className = "small " + (live && LIVE.itemsOk ? "ok-text" : "muted");
   $("manualNote").textContent = live
     ? "Connected to a live match: these are filled in from it. Change anything that's wrong; your change is kept and marked, and Use match data puts the match's values back."
-    : "Use this without a live match, or to correct something. With a live match these fill in by themselves, and anything you change is marked as your change.";
+    : "Pick the heroes yourself and type your souls as you go. Use it when you can't connect, or to correct something: with a live match these fill in by themselves, and anything you change is marked as your change.";
 }
 /* Put the match's teams and lane back after a hand change. */
 function useMatchData() {
@@ -5083,16 +5373,21 @@ function renderReview() {
 function shortReason(s, kind, why) {
   if (why) return why;
   const fitText = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 2)
-    .map(f => `${pts(f.lift)} with ${itemName(f.anchorId)}`);
+    .map(f => `${pts(f.lift)}% with ${itemName(f.anchorId)}`);
   if (kind === "build") return fitText.join(" · ") || "Fits your build";
   if (s.timing?.kind === "early" && (s.timing.factor < 0.75 || kind === "core")) return "Best bought early: " + (s.timing.factor < 0.999 ? "less value left this late" : "worth less bought now");
   if (kind === "core" || kind === "part") {
-    if (s.adj >= 0.004) return `Strong ${heroName(S.me)} pick now: ${pts(s.adj)} pts (adjusted)`;
+    if (s.adj >= 0.004) return `Strong ${heroName(S.me)} pick now: ${pts(s.adj)}% win rate (adjusted)`;
     return s.base ? `Standard pick, usually bought around minute ${Math.round(s.base.avg_buy_time_s / 60)}` : "Standard pick";
   }
-  if (s.mechWhy?.length && kind === "counter" && !(s.bestZ >= STRONG_Z && s.score > 0.005)) return s.mechWhy[0];
-  const helps = (s.vs || []).filter(v => v.lift > 0).sort((a, b) => b.lift - a.lift).slice(0, 2);
-  const txt = (s.mechWhy?.length ? [s.mechWhy[0].replace(/ \(.*\)/, "")] : []).concat(helps.map(v => `${pts(v.lift)} vs ${heroName(v.enemyId)}`)).join(" · ") || "Counter pick";
+  // What it counters and how directly (v3.2): "Direct counter: answers ...", "General defence", or what the statistics say.
+  const how = counterHow(s, tagsOf(s.item));
+  const helps = (s.vs || []).filter(v => v.lift > 0).sort((a, b) => b.lift - a.lift).slice(0, how === "direct" ? 1 : 2);
+  const vsWords = helps.length ? `wins more vs ${helps.map(v => `${heroName(v.enemyId)} (${pts(v.lift)}%)`).join(", ")}` : "";
+  const direct = how === "direct" ? "Direct counter: " + s.mechWhy[0].replace(/ \(.*\)/, "").replace(/^Answers/, "answers") : "";
+  const showStats = how !== "direct" || (s.bestZ >= STRONG_Z && s.score > 0.005);
+  const txt = (how === "direct" ? [direct, showStats ? vsWords : ""] : how === "defence" ? ["General defence", vsWords] : [vsWords ? vsWords[0].toUpperCase() + vsWords.slice(1) : ""])
+    .filter(Boolean).join(" · ") || "Counter pick";
   // A counter that's weak overall isn't planned (v3.1): say so first, or the list and the buy order seem to disagree (a friend's
   // Infernus match: Metal Skin listed as a counter, never planned, because players who buy it that late do worse overall).
   const out = weakCounter(s) ? "Weak overall, so not planned · " + txt : txt;
@@ -5204,15 +5499,15 @@ function detailLines(s, kind, souls, entry) {
       const t = S.view?.threat?.get(v.enemyId);
       lines.push(`Against <b>${esc(heroName(v.enemyId))}</b>${S.lane.has(v.enemyId) ? " (your lane)" : ""}: won <span class="num">${pct(v.pe)}</span> of ${v.n.toLocaleString()} games, versus <span class="num">${pct(s.pb)}</span> normally. `
         + (v.lane ? `In lane against ${esc(heroName(v.enemyId))} (${v.lane.n.toLocaleString()} games where the buyer laned against them): won <span class="num">${pct(v.lane.pe)}</span>; the lane result counts ${Math.round(v.lane.w * 100)}%. ` : "")
-        + `After allowing for how ${esc(S.heroById[S.me].name)} does against ${esc(heroName(v.enemyId))} in general, that's <span class="up">${pts(v.lift)} pts</span>.`
+        + `After allowing for how ${esc(S.heroById[S.me].name)} does against ${esc(heroName(v.enemyId))} in general, that's <span class="up">${pts(v.lift)}%</span> win rate.`
         + (t && t.weight > 1.05 ? ` ${esc(heroName(v.enemyId))} is a tough matchup for you (${pct(t.wr)} win rate), so this counts extra.` : ""));
     }
-    for (const v of (s.vs || []).filter(v => v.z <= -WEAK_Z)) lines.push(`Does worse than usual against <b>${esc(heroName(v.enemyId))}</b> (<span class="down">${pts(v.lift)} pts</span>).`);
+    for (const v of (s.vs || []).filter(v => v.z <= -WEAK_Z)) lines.push(`Does worse than usual against <b>${esc(heroName(v.enemyId))}</b> (<span class="down">${pts(v.lift)}%</span> win rate).`);
     for (const f of (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift)) {
-      lines.push(`Pairs well with <b>${esc(itemName(f.anchorId))}</b>: <span class="up">${pts(f.lift)} pts</span> beyond the usual boost from owning it (${f.n.toLocaleString()} games${f.src === "pair" ? ", players who bought both at any point; counted at half weight" : ""}).`);
+      lines.push(`Pairs well with <b>${esc(itemName(f.anchorId))}</b>: <span class="up">${pts(f.lift)}%</span> win rate beyond the usual boost from owning it (${f.n.toLocaleString()} games${f.src === "pair" ? ", players who bought both at any point; counted at half weight" : ""}).`);
     }
     for (const f of (s.fits || []).filter(f => f.z <= -WEAK_Z)) {
-      lines.push(`Pairs poorly with <b>${esc(itemName(f.anchorId))}</b> (<span class="down">${pts(f.lift)} pts</span>${f.src === "pair" ? ", players who bought both at any point" : ""}). It may overlap with what that item already does.`);
+      lines.push(`Pairs poorly with <b>${esc(itemName(f.anchorId))}</b> (<span class="down">${pts(f.lift)}%</span> win rate${f.src === "pair" ? ", players who bought both at any point" : ""}). It may overlap with what that item already does.`);
     }
     for (const w of s.mechWhy || []) lines.push(`<b>${S.view?.match?.live === false ? "This match" : "Live match"}:</b> ${esc(w)}.`);
     for (const w of s.mechWarn || []) lines.push(`<span class="down">${esc(w)}</span>, so this is ranked lower.`);
@@ -5279,15 +5574,19 @@ function threeParts(entry, souls, view = S.view) {
   // Why this item.
   // The plan's step ("Upgrade Mystic Vulnerability") says what; the reason says why.
   const whyShort = [entry.why ? entry.why.replace(/\s*\([^)]*\)\s*$/, "") : "", shortReason(s, kind, null)].filter(Boolean).join(" · ");
-  const helps = (s.vs || []).filter(v => v.lift > 0 && v.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 2).map(v => `${pts(v.lift)} pts against ${heroName(v.enemyId)}`);
+  const helps = (s.vs || []).filter(v => v.lift > 0 && v.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 2).map(v => `${pts(v.lift)}% win rate against ${heroName(v.enemyId)}`);
   const whyLong = [verdictFor(s, kind), ...(s.mechWhy || []).slice(0, 2).map(w => w + "."), helps.length ? `Statistics: ${helps.join(", ")}.` : "",
     (s.mechInfo || [])[0] ? `Enemy abilities: ${s.mechInfo[0]} (for information).` : ""].filter(Boolean).join(" ");
   // Why now.
   const sec = gameSecondsNow() ?? planSeconds();
   const rate = incomeRate(S.curve, sec), mins = need ? Math.max(1, Math.round(need / Math.max(1, rate) / 60)) : 0;
-  const nowShort = need ? `${need.toLocaleString()} more souls (about ${mins} min)` : "You can buy it now";
-  const nowLong = [need ? `You need ${need.toLocaleString()} more souls${total !== s.cost ? " to reach this step" : ""}, about ${mins} minute${mins === 1 ? "" : "s"} at a usual income.` : "You can buy it now.",
-    entry.sell ? "" : entry.plan || "", s.timing?.note ? s.timing.note.replace(/\.?$/, ".") : ""].filter(Boolean).join(" ");   // a sale is explained under "give up"
+  // v3.2: the reason for buying it at this point first (Moppy, October 16: "you can buy it now" isn't a reason), then the souls.
+  const reason = nowReason(entry, sec);
+  const planSaid = /^(Worth saving for|Good value right away|The best value you can buy|Nothing you can afford)/.test(entry.plan || "") && /^(Worth saving|Good value now|The most value|Nothing you can afford)/.test(reason);
+  const afford = need ? `${need.toLocaleString()} more souls (about ${mins} min)` : "you can buy it now";
+  const nowShort = reason ? `${reason} · ${afford}` : afford[0].toUpperCase() + afford.slice(1);
+  const nowLong = [planSaid ? entry.plan : reason ? reason.replace(/\.?$/, ".") : "", need ? `You need ${need.toLocaleString()} more souls${total !== s.cost ? " to reach this step" : ""}, about ${mins} minute${mins === 1 ? "" : "s"} at a usual income.` : "You can buy it now.",
+    entry.sell || planSaid ? "" : entry.plan || "", s.timing?.note ? s.timing.note.replace(/\.?$/, ".") : ""].filter(Boolean).join(" ");   // a sale is explained under "give up"
   // What you'd give up.
   let giveShort, giveLong;
   if (entry.sell) {
@@ -5303,11 +5602,33 @@ function threeParts(entry, souls, view = S.view) {
     if (alt) {
       const d = itemValue(s) - itemValue(alt);
       const size = x => (Math.abs(x) * 100).toFixed(1);
-      giveShort = `Instead of ${alt.item.name}` + (Math.abs(d) >= 0.002 ? ` (${size(d)} pts ${d > 0 ? "less" : "more"} on paper)` : " (about as good)");
-      giveLong = `The best other choice at about this price is ${alt.item.name} (${alt.cost.toLocaleString()} souls)` + (d >= 0.002 ? `: worth about ${size(d)} pts less to you now.` : d <= -0.002 ? `: worth ${size(d)} pts more on its own, but ${it.name} fits the plan better (sooner, or a step toward an upgrade).` : `: about as good, so either is fine.`);
+      // In words (v3.2); the number, labelled, in the long version.
+      const much = x => Math.abs(x) >= 0.01 ? "clearly " : Math.abs(x) < 0.005 ? "slightly " : "";
+      giveShort = `Instead of ${alt.item.name}` + (Math.abs(d) >= 0.002 ? ` (${d > 0 ? `${much(d)}weaker for you now` : `${much(d)}stronger on its own`})` : " (about as good)");
+      giveLong = `The best other choice at about this price is ${alt.item.name} (${alt.cost.toLocaleString()} souls)` + (d >= 0.002 ? `: worth about ${size(d)}% win rate less to you now (the tool's estimate).` : d <= -0.002 ? `: worth about ${size(d)}% win rate more on its own (the tool's estimate), but ${it.name} fits the plan better (sooner, or a step toward an upgrade).` : `: about as good, so either is fine.`);
     } else { giveShort = "Nothing close at this price"; giveLong = "No other recommended item at about this price comes close."; }
   }
   return { why: [whyShort, whyLong], now: [nowShort, nowLong], give: [giveShort, giveLong] };
+}
+/* Why buy it at this point (v3.2), one short phrase, or "" when the plan has nothing to add beyond the souls. In order: a
+   sale, an upgrade paying only the difference, a step toward an upgrade, timing (best early, builds value), the plan's
+   reason for the next buy (worth saving for, good value now), or when players usually buy it. */
+function nowReason(entry, sec) {
+  const { s } = entry, it = s.item, plan = entry.plan || "";
+  if (entry.sell) return `Worth clearly more to you now than your ${entry.sell.item?.name || "weakest item"}`;
+  if (entry.exception) return "Only as the first step to its upgrade";
+  if (entry.upgrade) return S.owned.has(entry.upgrade.from) ? `Upgrading costs only the ${s.cost.toLocaleString()} difference` : `Upgrades ${itemName(entry.upgrade.from)}, bought first`;
+  if (entry.into) return `A step toward ${itemName(entry.into)}: its stats while you save`;
+  if (s.timing?.kind === "early" && (tagsOf(it).has("invest") || s.timing.factor < 0.75)) return tagsOf(it).has("invest") ? "Builds value the longer you own it, so sooner is better" : "Best bought early: worth less later";
+  if (/^Worth saving for/.test(plan)) return plan.replace(/^Worth saving for: more value per soul than buying (.+) now\.$/, "Worth saving for: better value than $1");
+  if (/^Good value right away/.test(plan)) return plan.replace(/^Good value right away, and it doesn't delay (.+) much\.$/, "Good value now, and $1 isn't delayed much");
+  if (/^The best value you can buy/.test(plan)) return "The most value for your souls right now";
+  if (/^Nothing you can afford/.test(plan)) return "Nothing you can afford now is better value";
+  if (s.timing?.kind === "early") return "Does best bought early";
+  if (s.timing?.kind === "later") return "Does better later, so fine to wait if something else fits";
+  const at = s.base?.avg_buy_time_s, now = sec ?? 0;
+  if (at > 0) return Math.abs(at - now) <= 240 ? `Players usually buy it about now (minute ${Math.round(at / 60)})` : at < now ? `Usually bought by minute ${Math.round(at / 60)}` : `Usually bought around minute ${Math.round(at / 60)}`;
+  return "";
 }
 function threeList(tp, long, cls = "three") {
   const dl = document.createElement("dl"); dl.className = cls;
@@ -5622,20 +5943,20 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   // Short reasons
   const tough = id => (S.view?.threat?.get(id)?.weight || 1) > 1.05;
   const counters = (s.vs || []).filter(x => x.lift > 0).sort((a, b) => b.lift - a.lift).slice(0, 4)
-    .map(x => [`vs ${heroName(x.enemyId)}${x.lane ? " in lane" : S.lane.has(x.enemyId) ? " (your lane)" : ""}${tough(x.enemyId) ? " · tough matchup" : ""}`, `${pts(x.lift)} pts`, "up"]);
+    .map(x => [`vs ${heroName(x.enemyId)}${x.lane ? " in lane" : S.lane.has(x.enemyId) ? " (your lane)" : ""}${tough(x.enemyId) ? " · tough matchup" : ""}`, `${pts(x.lift)}%`, "up"]);
   const fits = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 3)
-    .map(f => [`with ${itemName(f.anchorId)}`, `${pts(f.lift)} pts`, "up"]);
+    .map(f => [`with ${itemName(f.anchorId)}`, `${pts(f.lift)}%`, "up"]);
   const live = (s.mechWhy || []).map(x => [x, null]);
   // The enemies' abilities (v2.10): what this answers, for information (not counted in its rank: see KIT_W).
   const kitInfo = (s.mechInfo || []).map(x => [x[0].toUpperCase() + x.slice(1), null]);
   if (s.amp && !s.amp.none) fits.push([`Amplifies your healing from ${s.amp.sources.slice(0, 3).join(", ")}${s.amp.sources.length > 3 ? " and more" : ""}`, null]);
-  const warns = [...(s.vs || []).filter(x => x.z <= -WEAK_Z).map(x => [`vs ${heroName(x.enemyId)}`, `${pts(x.lift)} pts`, "down"]),
-    ...(s.fits || []).filter(f => f.z <= -WEAK_Z).map(f => [`with ${itemName(f.anchorId)} (may overlap)`, `${pts(f.lift)} pts`, "down"]),
+  const warns = [...(s.vs || []).filter(x => x.z <= -WEAK_Z).map(x => [`vs ${heroName(x.enemyId)}`, `${pts(x.lift)}%`, "down"]),
+    ...(s.fits || []).filter(f => f.z <= -WEAK_Z).map(f => [`with ${itemName(f.anchorId)} (may overlap)`, `${pts(f.lift)}%`, "down"]),
     ...(s.mechWarn || []).map(x => [x, null])];
   if ((s.rarePenalty || 0) >= 0.003) warns.push([`Few ${heroName(S.me)} players buy it at this stage (${Math.max(0.1, Math.round((s.popShare || 0) * 1000) / 10)}% as many as the most popular item), so it needs a strong reason`, null]);
   if (s.amp?.none) warns.push([`Nothing to amplify: ${it.name} works with healing you apply${s.amp.noLifesteal ? " (abilities or items that heal, not lifesteal or regen)" : " (lifesteal, or abilities and items that heal)"}. Your hero's abilities don't heal and you own nothing that does, so only its basic stats count and it isn't planned.`, null]);
   else if (lacksReason(s)) warns.push(["Out of its stage, and nothing in this match calls for it, so it isn't planned", null]);
-  if (weakCounter(s) && kind !== "owned") warns.push([`It answers something in this match, but ${heroName(S.me)} players who buy it at this point do worse overall (${pts(itemValue(s))} pts all told), so it isn't in the buy order`, null]);
+  if (weakCounter(s) && kind !== "owned") warns.push([`It answers something in this match, but ${heroName(S.me)} players who buy it at this point do worse overall (${pts(itemValue(s))}% win rate all told), so it isn't in the buy order`, null]);
   if (s.overlap) warns.push([`Does the same job as ${s.overlap.with}, which you own (${TAG_NAMES[s.overlap.tag]}): only ${Math.round(s.overlap.factor * 100)}% of its usual advantage counts`, null]);
   if (entry.sell) warns.push([`Needs a free slot: sell ${entry.sell.item?.name || "an item"} first (you get back ${entry.sell.refund.toLocaleString()} souls)`, null]);
   const std = (kind === "core" || kind === "part") && s.base ? [[`Win rate when bought now (${s.base.players.toLocaleString()} players)`, pct(s.pb)]] : [];
@@ -5643,7 +5964,7 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   const now = [];
   if (entry.plan && !three) now.push([entry.plan, null]);   // already in "Why now" above (v3.0)
   if (s.timing?.note && !three) now.push([s.timing.note, null]);
-  if (s.flow && s.adj && Math.abs(s.adj) >= 0.003) now.push([`Value for ${heroName(S.me)} at this stage, adjusted for how far ahead buyers were`, `${pts(s.adj)} pts`, s.adj > 0 ? "up" : "down"]);
+  if (s.flow && s.adj && Math.abs(s.adj) >= 0.003) now.push([`Value for ${heroName(S.me)} at this stage, adjusted for how far ahead buyers were`, `${pts(s.adj)}%`, s.adj > 0 ? "up" : "down"]);
   const k = flowCol(planSeconds());
   // Upgrade path: what this item builds from and into (from the game data), and what the plan intends.
   const prog = S.prog || { parts: new Map(), ups: new Map() };
@@ -5657,10 +5978,10 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
     ? `You own ${itemName(entry.upgrade.from)}, so you pay only the ${s.cost.toLocaleString()} difference.`
     : `Buy ${itemName(entry.upgrade.from)} first (earlier in the buy order), then pay only the ${s.cost.toLocaleString()} difference.`, null]);
   else if (entry.why?.startsWith("Builds into")) pathRows.push(["Buy it now for its stats; the plan upgrades it later, when the extra cost is worth more than other items.", null]);
-  const timeline = (s.flow?.cols || []).map((x, c) => x ? [`Bought at ${FLOW_COLS[c]}${c === k ? " (now)" : ""}: ${x.n.toLocaleString()} games`, `${pts(x.raw)} pts`, x.raw >= 0 ? "up" : "down"] : null).filter(Boolean);
+  const timeline = (s.flow?.cols || []).map((x, c) => x ? [`Bought at ${FLOW_COLS[c]}${c === k ? " (now)" : ""}: ${x.n.toLocaleString()} games`, `${pts(x.raw)}%`, x.raw >= 0 ? "up" : "down"] : null).filter(Boolean);
   const ch = changeNote(it.id);
   const patchRows = ch ? [[ch.long, null]] : [];
-  for (const sec of [factList("Recent game update", patchRows), factList(three ? "Timing and value" : "Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList(S.view?.match?.live === false ? "From this match" : "From the live match", live), factList("Enemy abilities (for information: the statistics already allow for them)", kitInfo), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
+  for (const sec of [factList("Recent game update", patchRows), factList(three ? "Timing and value" : "Why now", now), factList("Upgrade path", pathRows), factList("Counters (win rate compared with usual)", counters), factList("Build fit (win rate compared with usual)", fits), factList(S.view?.match?.live === false ? "From this match" : "From the live match", live), factList("Enemy abilities (for information: the statistics already allow for them)", kitInfo), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
   if (!s.base && kind !== "owned" && kind !== "search") { const p = document.createElement("p"); p.className = "muted small"; p.textContent = "Not enough games to rate this item by itself."; box.append(p); }
   if (!S.owned.has(it.id)) { const bb = buyButton(it, s.cost, `✓ Bought ${it.name}`); bb.style.justifySelf = "start"; box.append(bb); }
   // Full numbers and method, for when you want them
@@ -5682,7 +6003,7 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
 }
 
 const TABS = [
-  ["counters", "Counters", "Do clearly better than usual against this enemy team"],
+  ["counters", "Counters", "Do clearly better than usual against this enemy team. Direct counter: answers something they have. General defence: protection that works well against them. Haze (+2.1%): buyers win 2.1% more often against Haze than usual."],
   ["build", "Build fit", "Do better than usual alongside items you own"],
   ["situational", "Situational", "Some sign they help, thinner evidence"],
   ["core", "Standard", "Best value for your hero at this stage, adjusted for how far ahead buyers were"]
@@ -6135,8 +6456,9 @@ function undoBought() {
 function showBoard(on) {
   S.active = on;
   $("board").hidden = !on; $("setup").hidden = on; $("header").hidden = on;
-  $("editSetup").hidden = !on; $("editSetup").textContent = "Setup";
+  $("editSetup").hidden = !on; $("editSetup").textContent = "Match setup";
   $("go").textContent = on ? "Update recommendations" : "Get recommendations";
+  renderAppState();
 }
 /* Start the match clock the first time recommendations are requested in a match. Never restarts a
    running clock, and never restarts one you stopped. If you picked a later stage by hand, the clock
@@ -6253,7 +6575,7 @@ async function init() {
     // Patch awareness: which items changed since your last visit (kept 14 days). The first visit only remembers.
     const ic = itemChanges(S.items, store.get("itemSigs"), store.get("itemChanges"));
     S.itemChanges = ic.changes; store.set("itemSigs", { at: Date.now(), sigs: ic.sigs }); store.set("itemChanges", ic.changes);
-    logInit(); $("logOn").checked = LOG.on; renderLogSummary(); renderLogWhere(); fileRestore();
+    logInit(); $("logOn").checked = LOG.on; $("logOffer").checked = offerSave(); renderLogSummary(); renderLogWhere(); fileRestore(); renderAppState();
     const updates = patches.filter(p => /update|patch/i.test(p.title || "")).map(p => ({ title: p.title, date: new Date(p.pub_date) }))
       .filter(p => !isNaN(p.date)).sort((a, b) => b.date - a.date);
     S.patch = updates[0] || null;
@@ -6348,6 +6670,16 @@ $("logClear").onclick = () => {
 $("logNote").oninput = () => { const r = LOG.cur || LOG.records[LOG.records.length - 1]; if (r) { r.note = $("logNote").value.slice(0, 500); logSave(); } };
 $("window").onchange = () => { S.windowFrom = null; store.set("window", $("window").value); rankChanged(); logEvent("setting", { window: $("window").value }); };
 $("liveRank").onchange = () => { $("rankRange").value = $("liveRank").value; $("rankRange").onchange(); };
+for (const [id] of RANK_PICKERS) $(id).onclick = e => { e.stopPropagation(); openRankPanel($(id)); };
+$("rankPanel").onclick = e => { e.stopPropagation(); const b = e.target.closest("button[data-v]"); if (b) pickRank(b.dataset.v); };
+$("rankPanel").onkeydown = e => {
+  if (e.key === "Escape") { e.stopPropagation(); closeRankPanel(true); return; }
+  if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
+  const all = [...$("rankPanel").querySelectorAll("button[data-v]")], i = all.indexOf(document.activeElement);
+  const step = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : -1;
+  all[(i + step + all.length) % all.length]?.focus(); e.preventDefault();
+};
+document.addEventListener("click", e => { if (!$("rankPanel").hidden && !$("rankPanel").contains(e.target)) closeRankPanel(); });
 $("liveWindow").onchange = () => { $("window").value = $("liveWindow").value; $("window").onchange(); };
 $("souls").oninput = () => {
   const b = soulBase();
@@ -6363,6 +6695,16 @@ $("buildSearch").oninput = renderBuildSearch;
 $("buildSearch").onkeydown = e => { if (e.key === "Escape") { $("buildSearch").value = ""; renderBuildSearch(); } };
 $("linkMatch").onclick = () => linkMatch();
 $("findMatch").onclick = findMyMatch;
+/* The Match over card (v3.2) */
+$("moReview").onclick = () => openReview(String(S.endedMatchId || S.lastMatchId || ""));
+$("moSave").onclick = async () => { $("moSaved").textContent = "Saving…"; await logExport(false); $("moSaved").textContent = $("logSaved").textContent; };
+$("moReconnect").onclick = () => { const id = String(S.endedMatchId || ""); if (!id) return; $("matchId").value = id; S.endedMatchId = null; linkMatch({ id }); };
+$("moNext").onclick = () => newMatch();
+$("moHide").onclick = () => { S.overHidden = S.endedMatchId; renderAppState(); };
+$("moNote").oninput = () => { const r = endedRecord(); if (r) { r.note = $("moNote").value.slice(0, 500); logSave(); renderLogSummary(); } };
+const setOfferSave = on => { store.set("offerSave", on); $("logOffer").checked = on; renderAppState(); };
+$("moOfferOff").onchange = () => setOfferSave(!$("moOfferOff").checked);
+$("logOffer").onchange = () => setOfferSave($("logOffer").checked);
 $("watchNext").onchange = () => { S.watch = $("watchNext").checked; store.set("watch", S.watch); renderLive(); if (S.watch) watchTick(); };
 $("useMatchTeams").onclick = useMatchData;
 // Pasting a match ID connects straight away (typing still needs Connect or Enter).
@@ -6386,9 +6728,10 @@ $("unlinkMatch").onclick = () => unlinkMatch(false);
 $("matchId").onkeydown = e => { if (e.key === "Enter") linkMatch(); };
 function openSetup(show) {
   $("setup").hidden = !show; $("board").hidden = show || !S.active;
-  $("editSetup").textContent = show ? "Back to board" : "Setup";
+  $("editSetup").textContent = show ? "Back to the match" : "Match setup";
   $("go").textContent = S.active ? "Update recommendations" : "Get recommendations";
   if (!show && S.active) { loadThreats(); renderResults(); }   // pick up enemy or setting changes made in setup
+  renderAppState();
 }
 $("editSetup").onclick = () => openSetup($("setup").hidden);
 $("livePill").onclick = () => { openSetup(true); $("header").hidden = false; window.scrollTo?.(0, 0); (S.steam ? (LIVE.id ? $("liveStatus") : $("findMatch")) : $("steamInput")).focus?.(); };
@@ -6462,7 +6805,7 @@ $("feedbackOpen").onclick = () => { $("feedbackOverlay").hidden = false; $("fbNo
 $("fbClose").onclick = () => { $("feedbackOverlay").hidden = true; };
 $("feedbackOverlay").onclick = e => { if (e.target === $("feedbackOverlay")) $("feedbackOverlay").hidden = true; };
 $("fbRecord").onchange = () => { $("fbRecordHelp").hidden = !$("fbRecord").checked; };
-$("fbSaveRecords").onclick = () => { if (!LOG.records.length) { $("fbNote").textContent = "There are no match records yet. Play a match with \"Record my matches\" ticked (under Setup → Match records), then come back."; return; } logExport(false); $("fbNote").textContent = "Saved (check your Downloads folder). Now continue on GitHub and drag the file in."; };
+$("fbSaveRecords").onclick = () => { if (!LOG.records.length) { $("fbNote").textContent = "There are no match records yet. Play a match with \"Record my matches\" ticked (under Match setup → Match records), then come back."; return; } logExport(false); $("fbNote").textContent = "Saved (check your Downloads folder). Now continue on GitHub and drag the file in."; };
 $("fbSend").onclick = () => {
   const f = feedbackParts();
   if (!f.text) { $("fbNote").textContent = "Write a few words first."; $("fbText").focus(); return; }
@@ -6522,22 +6865,7 @@ $("clearAll").onclick = () => {
     $("clearAll").dataset.armed = "1"; $("clearAll").textContent = "Tap again to clear"; $("clearAll").classList.add("main");
     clearTimeout(clearTimer); clearTimer = setTimeout(disarmClear, 4000); return;
   }
-  disarmClear();
-  logClose("new match");
-  S.me = null; store.set("me", null);
-  S.enemies = []; S.lane = new Set(); S.owned = new Set(); S.clockStart = null; S.clockStartedOnce = false; S.soulOffset = 0; S.lastSouls = null;
-  $("buildSearch").value = ""; renderBuildSearch();
-  S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = []; S.soulsRef = null; S.selected = null; S.tab = null; S.view = null; S.cache = {}; S.pending = []; S.windowFrom = null;
-  unlinkMatch(true); cancelLinkRetry(); $("matchId").value = ""; liveDiag(""); liveStatus("Cleared for a new match. Press Find my match once you're in the game, or set things up by hand.");
-  $("souls").value = 0; setPhase("lane");
-  // Your rank and period choices stay (v2.7.4): they're picked before finding a match, not per match.
-  S.rankWiden = 0; $("window").value = windowDefault(); renderRankNote();
-  ["heroSearch", "enemySearch", "itemSearch"].forEach(id => $(id).value = "");
-  S.slot = "all"; $("slotFilter").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.slot === "all"));
-  $("pickerOverlay").hidden = true; $("toast").hidden = true; undoState = null;
-  S.lastMatchId = null; S.endedMatchId = null; S.clockAdjust = 0; S.handEnemies = false; LIVE.matchErr = null;
-  showBoard(false);
-  saveMatch(); renderAll(); tickClock(); renderLive(); window.scrollTo(0, 0);
+  newMatch();
 };
 function disarmClear() { clearTimeout(clearTimer); delete $("clearAll").dataset.armed; $("clearAll").textContent = "New match"; $("clearAll").classList.remove("main"); }
 $("toolVersion").textContent = VERSION;   // one place to change the version
