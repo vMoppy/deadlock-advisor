@@ -421,7 +421,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.2.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.2.2</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -711,10 +711,12 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.2.1";   // shown in the top bar and written into match records
+const VERSION = "v3.2.2";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.2.2", date: "October 17, 2026", items: [
+    "When a live match ends, the match clock and souls stop at their final values instead of counting on (souls are marked \"final\"). ±1 min and typing the time still work. Reconnect or the next match brings them back to life."] },
   { v: "v3.2.1", date: "October 17, 2026", items: [
     "Connecting without a Steam account always asks which hero you are, once per match. A hero left selected under Manual setup is no longer assumed to be you (it could be someone else's in the match).",
     "Wrong hero? (top bar and Match setup) lets you correct it during the match: your enemies, items and recommendations switch to the right hero. Click your selected hero again to clear it.",
@@ -3625,10 +3627,28 @@ function pairsNow() {
 /* ---------- Match clock ---------- */
 /* The game time the recommendations plan for: the clock, or the middle of the stage picked by hand. */
 function planSeconds() { return clockSeconds() ?? ({ lane: 240, mid: 870, late: 1500 })[S.phase]; }
-function clockSeconds() { return S.clockStart == null ? null : Math.max(0, (Date.now() - S.clockStart) / 1000); }
+function clockSeconds() {
+  if (S.frozen && S.clockStart != null) return S.frozen.sec;   // the match has ended (v3.2.2): its final time
+  return S.clockStart == null ? null : Math.max(0, (Date.now() - S.clockStart) / 1000);
+}
+/* The match has ended (v3.2.2, Moppy, October 17): the clock and souls stop at their final values instead of counting on. Up to
+   v3.2.1 the clock kept running from the last broadcast time, and souls grew at your hero's usual income (meant for a broadcast
+   that pauses, not one that's over). Uses the existing end detection (matchEnded: the game's game-over message, or the broadcast
+   stopping for good); Reconnect, Next match or a new match clear it. The time is the last broadcast tick's (with your ±1 min),
+   not the moment the end was noticed, which can be a minute or two later when the broadcast just stopped. */
+function freezeMatch() {
+  if (S.frozen) return;
+  const t = tickGameTime(LIVE.lastTick), sec = t != null ? Math.max(0, t + (S.clockAdjust || 0)) : clockSeconds();
+  const fresh = LIVE.souls != null && !LIVE.soulsSuspect;
+  const souls = fresh ? Math.max(0, LIVE.souls - pendingSpend()) : soulsNow();
+  S.frozen = { sec: sec ?? null, souls, spent: spentOn(S.owned, S.itemById) };
+  S.soulOffset = 0;
+}
+function unfreezeMatch() { S.frozen = null; }
 /* With a live match the clock follows the broadcast's game time, so linking mid-match gives the right
    stage straight away. The broadcast runs 1 to 2 minutes behind your game; ±1 min lines it up and stays. */
 function syncClockToMatch() {
+  if (S.frozen) { S.clockSynced = false; return; }
   const bt = LIVE.id && LIVE.rosterState?.state !== "ended" ? broadcastGameTime() : null;
   S.clockSynced = bt != null;
   if (bt != null) { S.clockStart = Date.now() - (bt + (S.clockAdjust || 0)) * 1000; S.clockStartedOnce = true; S.clockEstimated = false; return; }
@@ -3694,6 +3714,7 @@ function pendingSpend() {
 }
 function soulBase() {
   const now = Date.now();
+  if (S.frozen) { const raw = S.frozen.souls + S.frozen.spent; return { src: "ended", raw, value: raw + S.soulOffset - spentOn(S.owned, S.itemById) }; }
   // Sanity check: unspent souls can't exceed net worth. If they do, the data layout has changed (e.g. the
   // currency slots moved), so the live souls value isn't trusted and net worth is used instead.
   LIVE.soulsSuspect = LIVE.souls != null && LIVE.nw > 0 && LIVE.souls > LIVE.nw * 1.05 + 500;
@@ -3728,9 +3749,9 @@ function updateSouls(force) {
   const tagEl = $("soulsSrc");
   tagEl.hidden = !b;
   if (b) {
-    tagEl.textContent = { live: "live", livenw: "from net worth", clock: "estimate" }[b.src];
+    tagEl.textContent = { live: "live", livenw: "from net worth", clock: "estimate", ended: "final" }[b.src];
     tagEl.className = "src-tag" + (b.src === "live" ? " live" : "");
-    tagEl.title = { live: "Your souls, read from the live match (1 to 2 minutes behind).", livenw: "Worked out from your live net worth minus your items.", clock: "Estimated from the match clock. Type your in-game number to correct it." }[b.src];
+    tagEl.title = { live: "Your souls, read from the live match (1 to 2 minutes behind).", livenw: "Worked out from your live net worth minus your items.", clock: "Estimated from the match clock. Type your in-game number to correct it.", ended: "The match has ended: your souls when it ended." }[b.src];
   }
   if (!b) { hint.textContent = S.clockStart == null ? "Start the match clock or link the match, and souls fill in by themselves." : S.me ? "Loading soul estimates…" : "Pick your hero to estimate souls."; S.soulSrc = null; return; }
   if (b.src !== S.soulSrc) {
@@ -3740,12 +3761,13 @@ function updateSouls(force) {
     /* Live souls stopped (the broadcast ended or paused): carry on from your last live number, growing at your hero's usual
        income, instead of jumping to the average player's (v2.8.4). Before, the number either froze at the last live value
        or reset to the average, so the buy order stopped changing (Venator and Solomon, about 30 minutes in). */
-    if ((was === "live" || was === "livenw") && b.src !== "live" && last != null) { S.soulOffset = last - (b.value - S.soulOffset); b = soulBase(); }
+    if ((was === "live" || was === "livenw") && b.src !== "live" && b.src !== "ended" && last != null) { S.soulOffset = last - (b.value - S.soulOffset); b = soulBase(); }
   }
   const v = autoSouls();
   if (document.activeElement !== $("souls")) $("souls").value = v;
   const off = Math.round(S.soulOffset / 100) * 100;
-  hint.textContent = b.src === "live" ? "Souls come from the live match, about 1 to 2 minutes behind. Items you mark bought count right away."
+  hint.textContent = b.src === "ended" ? "The match has ended: these are your souls when it ended."
+    : b.src === "live" ? "Souls come from the live match, about 1 to 2 minutes behind. Items you mark bought count right away."
     : b.src === "livenw" ? (LIVE.itemsOk ? "Souls come from your live net worth minus the items the match shows you own." : "Souls come from your live net worth minus items you've marked bought.") + (off ? " Corrected by what you typed." : "")
     : "Souls are estimated from the clock. Type your in-game number to correct it." +
       (off ? ` You're about ${Math.abs(off).toLocaleString()} ${off < 0 ? "behind" : "ahead of"} the average ${S.heroById[S.me].name}.` : "");
@@ -4258,7 +4280,7 @@ function resetMatchState() {
   S.enemies = []; S.lane = new Set(); S.owned = new Set(); S.clockStart = null; S.clockStartedOnce = false; S.soulOffset = 0;
   S.clockAdjust = 0; S.lastSouls = null; S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = [];
   S.soulsRef = null; S.selected = null; S.tab = null; S.pending = []; S.windowFrom = null; S.handEnemies = false;
-  S.endedMatchId = null; S.overHidden = null; S.rankWiden = 0; S.floatSince = null; S.partSeenAt = {}; S.fullOpen = null; S.mePick = S.mePick && String(S.mePick.matchId) === String(LIVE.id) ? S.mePick : null;
+  S.frozen = null; S.endedMatchId = null; S.overHidden = null; S.rankWiden = 0; S.floatSince = null; S.partSeenAt = {}; S.fullOpen = null; S.mePick = S.mePick && String(S.mePick.matchId) === String(LIVE.id) ? S.mePick : null;
   if ($("moSaved")) $("moSaved").textContent = "";   // v3.2.1: nothing of the last match's end carries over
   $("souls").value = 0; setPhase("lane");
   S.view = null;
@@ -4304,6 +4326,7 @@ async function linkMatch(opts = {}) {
 }
 async function linkSteps(id, opts) {
   unlinkMatch(true);
+  unfreezeMatch();   // a reconnect (the match wasn't over) or a new match: the clock and souls follow the broadcast again
   const token = ++linkSeq;
   const stale = () => token !== linkSeq;
   LIVE.id = id; LIVE.foundVia = opts.active ? "watch" : "typed"; LIVE.connecting = true; liveDiag("");
@@ -4401,7 +4424,9 @@ function unlinkMatch(quiet) {
 function matchEnded(how) {
   if (!LIVE.id || LIVE.rosterState?.state === "ended") return;
   for (const k in LIVE.streams) LIVE.streams[k].stop();
+  freezeMatch();
   S.endedMatchId = LIVE.id; LIVE.endHow = how; saveMatch();
+  tickClock(); updateSouls(true);   // show the final values straight away
   logEvent("end", { how }); logClose(how === "confirmed" ? "match ended" : "broadcast stopped");
   LIVE.rosterState = { state: "ended", text: how };
   const rec = LOG.on ? " Its record is kept under Match setup → Match records." : "", watch = S.watch ? " Watching for your next match." : "";
@@ -4462,7 +4487,7 @@ function newMatch() {
   ["heroSearch", "enemySearch", "itemSearch"].forEach(id => $(id).value = "");
   S.slot = "all"; $("slotFilter").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.slot === "all"));
   $("pickerOverlay").hidden = true; $("toast").hidden = true; undoState = null;
-  S.lastMatchId = null; S.endedMatchId = null; S.overHidden = null; S.mePick = null; S.floatSince = null; S.partSeenAt = {}; S.fullOpen = null; S.clockAdjust = 0; S.handEnemies = false; LIVE.matchErr = null; $("moSaved").textContent = "";
+  S.lastMatchId = null; S.frozen = null; S.endedMatchId = null; S.overHidden = null; S.mePick = null; S.floatSince = null; S.partSeenAt = {}; S.fullOpen = null; S.clockAdjust = 0; S.handEnemies = false; LIVE.matchErr = null; $("moSaved").textContent = "";
   showBoard(false);
   saveMatch(); renderAll(); tickClock(); renderLive(); window.scrollTo(0, 0);
 }
@@ -5740,6 +5765,7 @@ const FLOAT_ALERT_MS = 120000;
 function currentAlert(souls = soulsNow(), view = S.view) {
   const next = view?.order?.[0];
   const total = next ? (next.cumulative ?? next.s.cost) : Infinity, afford = total <= souls;
+  if (S.frozen) { S.floatSince = null; return null; }   // the match is over (v3.2.2): nothing to buy now
   const dead = !!LIVE.id && LIVE.meAlive === false;
   const name = next?.s.item.name;
   if (dead) {
@@ -6947,6 +6973,7 @@ function parseClock(text) {
   return +m[1] * 60 + (m[2] != null ? +m[2] : 0);
 }
 function setClockTo(sec) {
+  if (S.frozen) { S.frozen.sec = Math.max(0, sec); if (S.clockStart == null) S.clockStart = Date.now() - sec * 1000; saveMatch(); tickClock(); renderResults(); return; }
   const bt = LIVE.id && LIVE.rosterState?.state !== "ended" ? broadcastGameTime() : null;
   if (bt != null) S.clockAdjust = Math.round(sec - bt);
   else { S.clockStart = Date.now() - sec * 1000; S.clockStartedOnce = true; S.clockEstimated = false; }
@@ -6966,9 +6993,9 @@ function closeClockInput(commit) {
 }
 $("clockInput").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); closeClockInput(true); $("clockTime").focus(); } else if (e.key === "Escape") { e.stopPropagation(); closeClockInput(false); $("clockTime").focus(); } };
 $("clockInput").onblur = () => closeClockInput(true);
-$("clockMinus").onclick = () => { if (S.clockSynced) S.clockAdjust = (S.clockAdjust || 0) - 60; else S.clockStart += 60000; saveMatch(); tickClock(); };
-$("clockPlus").onclick = () => { if (S.clockSynced) S.clockAdjust = (S.clockAdjust || 0) + 60; else S.clockStart -= 60000; saveMatch(); tickClock(); };
-$("clockStop").onclick = () => { S.clockStart = null; saveMatch(); tickClock(); updateSouls(true); };
+$("clockMinus").onclick = () => { if (S.frozen?.sec != null) S.frozen.sec = Math.max(0, S.frozen.sec - 60); else if (S.clockSynced) S.clockAdjust = (S.clockAdjust || 0) - 60; else S.clockStart += 60000; saveMatch(); tickClock(); };
+$("clockPlus").onclick = () => { if (S.frozen?.sec != null) S.frozen.sec += 60; else if (S.clockSynced) S.clockAdjust = (S.clockAdjust || 0) + 60; else S.clockStart -= 60000; saveMatch(); tickClock(); };
+$("clockStop").onclick = () => { S.clockStart = null; if (S.frozen) S.frozen.sec = null; saveMatch(); tickClock(); updateSouls(true); };
 let clearTimer = null;
 $("clearAll").onclick = () => {
   // A page left open for hours may have missed a game update: reload the game data for the new match.
