@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Deadlock Item Advisor</title>
-<script id="themeBoot">try { var t = JSON.parse(localStorage.getItem("dia-theme")); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script id="themeBoot">try { if (JSON.parse(localStorage.getItem("dia-theme")) === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
 <style>
@@ -19,14 +19,8 @@
     --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
     color-scheme: light;
   }
-  /* Dark colours: from the device setting, unless a theme was picked in the tool (v3.1.1: data-theme on <html>, set before the
-     page draws by the small script below, so a reload doesn't flash the other theme). */
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --bg: #15130f; --panel: #1e1b16; --fg: #ece5d8; --muted: #a0978a; --line: #36302a;
-      --accent: #e0a94a; --accent-soft: #3a2d17;
-      --weapon: #e8913f; --spirit: #b18ae8; --vitality: #6cc07a;
-      --good: #6cc08f; --warn: #e0a94a; --bad: #e27a6e; color-scheme: dark; }
-  }
+  /* Dark colours (v3.1.2: the default; v3.1.1 followed the device). data-theme on <html> starts as "dark"; the small script below
+     switches it to "light" before the page draws if you picked light. */
   :root[data-theme="dark"] { --bg: #15130f; --panel: #1e1b16; --fg: #ece5d8; --muted: #a0978a; --line: #36302a;
     --accent: #e0a94a; --accent-soft: #3a2d17;
     --weapon: #e8913f; --spirit: #b18ae8; --vitality: #6cc07a;
@@ -57,7 +51,10 @@
   .statline select { max-width: 100%; min-width: 0; justify-self: start; }
   @media (max-width: 380px) { .statline { grid-template-columns: 1fr; gap: 3px; } }
   .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-  .btn.icon { min-width: 34px; padding-inline: 8px; }
+  /* Light/dark (v3.1.2): one quiet round button in the bottom-right corner, on every screen (that corner is usually empty). */
+  #themeToggle { position: fixed; right: 12px; bottom: 12px; z-index: 30; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--panel); color: var(--fg); font-size: 18px; line-height: 1; cursor: pointer; opacity: .55; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  #themeToggle:hover, #themeToggle:focus-visible { opacity: 1; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* "More" menu in the top bar (v3.1) */
   .more { position: relative; }
@@ -148,6 +145,8 @@
   #summary .muted { font-weight: 400; }
   .group-inline { display: inline-flex; align-items: center; gap: 6px; }
   #clockTime { font: 700 20px/1 var(--display); font-variant-numeric: tabular-nums; min-width: 48px; text-align: right; }
+  .clockbtn { background: none; border: 0; padding: 2px 4px; color: var(--fg); cursor: text; border-radius: 4px; } .clockbtn:hover { background: var(--accent-soft); }
+  #clockInput { width: 64px; font: 700 18px/1 var(--display); text-align: right; }
   #stageTag { font: 600 12px var(--body); color: var(--muted); }
   .btn { border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 5px 10px;
     font: 600 13px var(--body); cursor: pointer; }
@@ -194,7 +193,7 @@
   #board { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
   .mod { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
   .mod-head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
-  .scroll { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+  .scroll { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 4px; scrollbar-gutter: stable; padding-right: 6px; }   /* v3.1.2: room for the scrollbar beside the text */
   @media (min-width: 760px) {
     #board { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "order lists" "build detail"; }
   }
@@ -220,8 +219,10 @@
   .buy { border: 1px solid var(--good); color: var(--good); background: transparent; border-radius: 6px;
     padding: 5px 8px; font: 600 12.5px var(--body); cursor: pointer; white-space: nowrap; }
   .buy:hover { background: var(--good); color: var(--panel); }
-  /* "Not for me": a small, quiet control next to Bought */
-  .skip { border: 1px solid var(--line); color: var(--muted); background: transparent; border-radius: 6px; width: 26px; height: 26px; padding: 0;
+  /* Skip: a small, quiet control next to Bought */
+  .skip .sx { display: none; }
+  @media (max-width: 480px) { .row .skip { padding: 0; width: 26px; } .row .skip .sw { display: none; } .row .skip .sx { display: inline; } }
+  .skip { border: 1px solid var(--line); color: var(--muted); background: transparent; border-radius: 6px; min-width: 26px; height: 26px; padding: 0 7px;
     font: 600 13px/1 var(--body); cursor: pointer; }
   .skip:hover { border-color: var(--bad); color: var(--bad); }
   .next .cost .skip { width: auto; height: auto; padding: 3px 8px; font-size: 12px; }
@@ -315,8 +316,9 @@
   @media (max-width: 480px) { .mv-why { grid-template-columns: minmax(0, 1fr); gap: 2px; } .mv-why dd { margin-bottom: 6px; } }
   .mv-then-h { font: 700 14px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   .mv-then { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 17px; }
-  .mv-then li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 2px 10px; padding: 6px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+  .mv-then li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; align-items: center; gap: 2px 10px; padding: 6px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
   .mv-then li > img { width: 24px; height: 24px; border-radius: 4px; }
+  .mv-then .skip { font-size: 13px; }
   .mv-then .sub { grid-column: 2 / -1; font-size: 14px; color: var(--muted); display: block; padding: 0; border: 0; }
   .mv-detail { border-top: 1px solid var(--line); padding-top: 12px; }
   /* Three-part explanation (v3.0): why this item, why now, what you'd give up. */
@@ -326,9 +328,8 @@
   /* Phone widths (v3.0): a dropdown is as wide as its longest option, which pushed the setup card past a 360 px screen. */
   select { max-width: 100%; min-width: 0; }
   .card, .card > *, .sub > *, .rowflex > * { min-width: 0; }
-  .gloss p { margin: 0 0 8px; }
   /* Item cards (v3.1): the tooltip beside an item, and the same card in the item's details. */
-  #itemTip { position: fixed; z-index: 40; width: 300px; max-width: calc(100vw - 16px); pointer-events: auto; }
+  #itemTip { position: fixed; z-index: 40; width: 300px; max-width: calc(100vw - 16px); pointer-events: auto; overflow-y: auto; border-radius: 10px; }
   .icard { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-top: 4px solid var(--accent); border-radius: 10px;
     box-shadow: 0 8px 24px rgba(0,0,0,.22); font-size: 13px; line-height: 1.35; overflow: hidden; }
   .icard.weapon { border-top-color: var(--weapon); } .icard.spirit { border-top-color: var(--spirit); } .icard.vitality { border-top-color: var(--vitality); }
@@ -376,28 +377,25 @@
       <span id="soulsSrc" class="src-tag" hidden></span>
     </span>
     <span class="group-inline" aria-label="Match clock">
-      <span id="clockTime" title="Match clock">--:--</span>
+      <button id="clockTime" type="button" class="clockbtn" title="Match clock. Click to type the time.">--:--</button><input id="clockInput" type="text" inputmode="numeric" placeholder="m:ss" aria-label="Match time, minutes and seconds" size="5" hidden>
       <span id="stageTag"></span>
       <button id="clockStart" class="btn tiny" type="button" title="Start the match clock now (use it at 0:00 in game)">Start clock</button>
       <button id="clockMinus" class="btn tiny" type="button" title="The clock is ahead of your game: move it back 1 minute" hidden>−1 min</button>
       <button id="clockPlus" class="btn tiny" type="button" title="The clock is behind your game: move it forward 1 minute" hidden>+1 min</button>
       <button id="clockStop" class="btn tiny" type="button" title="Stop the clock and pick the stage by hand" hidden>Stop</button>
     </span>
-    <button id="themeToggle" class="btn icon" type="button" aria-pressed="false" title="Switch to dark mode"><span aria-hidden="true">☾</span><span class="sr">Dark mode</span></button>
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Change your hero, enemies, lane or live match">Setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.1.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.1.2</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
       <summary class="btn">More</summary>
       <div class="more-pop">
         <button id="reviewOpen" class="linkbtn" type="button" title="After a match: your purchases next to what the tool suggested">Review a match</button>
-        <button id="glossOpen" class="linkbtn" type="button">Glossary</button>
-        <button id="notesOpen" class="linkbtn" type="button">What's new</button>
+        <button id="notesOpen" class="linkbtn" type="button">Patch notes</button>
         <button id="feedbackOpen" class="linkbtn" type="button">Feedback</button>
-        <button id="themeAuto" class="linkbtn" type="button" hidden>Theme: follow my device</button>
       </div>
     </details>
   </div>
@@ -581,15 +579,8 @@
 
 <div id="notesOverlay" class="overlay" hidden>
   <div class="sheet notes" role="dialog" aria-labelledby="notesTitle">
-    <div class="mod-head"><h2 id="notesTitle">What's new</h2><button id="notesClose" class="btn" type="button">Close</button></div>
+    <div class="mod-head"><h2 id="notesTitle">Patch notes</h2><button id="notesClose" class="btn" type="button">Close</button></div>
     <div id="notesBody" class="scroll"></div>
-  </div>
-</div>
-<div id="glossOverlay" class="overlay" hidden>
-  <div class="sheet notes" role="dialog" aria-modal="true" aria-labelledby="glossTitle">
-    <div class="mod-head"><h2 id="glossTitle">Glossary</h2><button id="glossClose" class="btn" type="button">Close</button></div>
-    <!-- Placeholder (v3.0.1, Moppy's decision): the v3.0 glossary text was unclear. To be rewritten once its content is decided (roadmap, v3.1). -->
-    <div id="glossBody" class="gloss scroll"><p><b>Feature Pending</b></p><p>Thanks for using my tool!</p><p>-moppy</p></div>
   </div>
 </div>
 <div id="reviewOverlay" class="overlay" hidden>
@@ -638,15 +629,22 @@
     <div id="itemList" class="items"></div>
   </div>
 </div>
+<button id="themeToggle" type="button" aria-pressed="true" title="Switch to light mode"><span aria-hidden="true">☀</span><span class="sr">Dark mode</span></button>
 <div id="toast" role="status" hidden><span id="toastText"></span><button id="toastUndo" type="button">Undo</button><button id="toastMore" type="button" hidden></button></div>
 
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.1.1";   // shown in the top bar and written into match records
+const VERSION = "v3.1.2";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.1.2", date: "October 16, 2026", items: [
+    "Compact mode: every step has a Skip button now, not only the next buy, and an item's card opens right next to it.",
+    "Item cards stay inside their own panel: a card from the middle list no longer covers the item details on the right.",
+    "Item details: \"What it does\" comes first, \"Show the full numbers\" stays open while the match updates, and the scrollbar no longer covers the text.",
+    "Dark mode is the default; switch with the round ☀ / ☾ button in the bottom-right corner (remembered). \"Not for me\" is now Skip, \"What's new\" is Patch notes, and the Glossary is gone.",
+    "Click the match clock to type the time (for example 14:30). With a live match it sets how far your game is ahead of the broadcast, and stays."] },
   { v: "v3.1.1", date: "October 16, 2026", items: [
     "Fixed: an item card no longer switches to another item when the recommendations change under your mouse. It keeps showing the item you were reading until you move away from that spot.",
     "New: a light/dark button (☾ / ☀) in the top bar. Until you press it the tool follows your device; your choice is remembered, and More → \"Theme: follow my device\" goes back.",
@@ -5113,11 +5111,14 @@ function costCell(s, souls, total) {
   return c;
 }
 
-/* "Not for me": leave this item out of the recommendations for the rest of this match. */
-function skipButton(it, entry, label = "✕") {
+/* Skip: leave this item out of the recommendations for the rest of this match. */
+/* Called "Not for me" up to v3.1.1; "Skip" everywhere since v3.1.2 (Moppy). In a dense list row it shows as ✕ on a narrow phone. */
+function skipButton(it, entry, label = "Skip") {
   const b = document.createElement("button"); b.type = "button"; b.className = "skip";
-  b.textContent = label; b.title = `Not for me: leave ${it.name} out of the recommendations for this match`;
-  b.setAttribute("aria-label", `Not for me: skip ${it.name} this match`);
+  if (label === "Skip") { const w = document.createElement("span"); w.className = "sw"; w.textContent = "Skip"; const x = document.createElement("span"); x.className = "sx"; x.textContent = "✕"; x.setAttribute("aria-hidden", "true"); b.append(w, x); }
+  else b.textContent = label;
+  b.title = `Skip: leave ${it.name} out of the recommendations for this match`;
+  b.setAttribute("aria-label", `Skip ${it.name} this match`);
   b.onclick = e => { e.stopPropagation(); skipItem(it, entry); };
   return b;
 }
@@ -5186,7 +5187,7 @@ function nextCard(entry, souls) {
   mid.append(eb, nm, rs);
   if (entry.plan) { const pl = document.createElement("div"); pl.className = "plan"; pl.textContent = entry.plan; mid.append(pl); }
   const right = costCell(s, souls, entry.cumulative ?? s.cost);
-  right.append(buyButton(it, s.cost), skipButton(it, entry, "Not for me"));
+  right.append(buyButton(it, s.cost), skipButton(it, entry));
   el.append(img(itemIcon(it)), mid, right);
   selectable(el, entry);
   return el;
@@ -5370,7 +5371,7 @@ function renderMatchView() {
   const open = !$("mvDetail").hidden;
   det.textContent = open ? "Hide details" : "Details"; det.setAttribute("aria-expanded", String(open));
   det.onclick = () => { $("mvDetail").hidden = !$("mvDetail").hidden; renderMatchView(); };
-  acts.append(bought, det, skipButton(it, next, "Not for me"));
+  acts.append(bought, det, skipButton(it, next));
   nx.append(img(itemIcon(it)), mid, bar, acts);
   // Why, now, give up: one line each.
   const tp = threeParts(next, souls);
@@ -5383,6 +5384,7 @@ function renderMatchView() {
     li.prepend(img(itemIcon(st.s.item)));   // v3.1.1: each step with its item's picture, like the next buy above
     li.querySelector(".nm").textContent = st.s.item.name;
     li.querySelector(".c").textContent = `${st.s.cost.toLocaleString()}` + (tot > souls ? ` · ${(tot - souls).toLocaleString()} more` : "");
+    li.append(skipButton(st.s.item, st));   // v3.1.2: every step can be skipped, not only the next buy (Moppy)
     if (st.upgrade) { const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = `Upgrade to Tier ${st.s.item.item_tier}`; li.append(sub); }
     if (st.sell) { const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = `${st.sell.later ? "If slots are still full: sell" : "Sell"} ${st.sell.item?.name || "an item"}`; li.append(sub); }
     then.append(li);
@@ -5458,13 +5460,40 @@ function tipTake(t) {
   if (t.title) { t.dataset.tipTitle = t.title; t.removeAttribute("title"); }
   t.setAttribute("aria-describedby", "itemTip");
 }
-function placeTip(box, r) {
-  const w = box.offsetWidth, h = box.offsetHeight, W = document.documentElement.clientWidth || innerWidth, H = innerHeight, g = 8;
+/* Where the card goes (v3.1.2): inside the panel the item is in, so it never covers another panel (a card from the middle list
+   used to cover the item details on the right, and in Compact mode it opened past the whole panel's right edge). Beside the
+   item when the panel has room there, otherwise above it (or below when there's no room above), as wide as the panel allows. */
+function placeTip(box, r, bounds) {
+  const W = document.documentElement.clientWidth || innerWidth, H = innerHeight, g = 8;
+  const B = { left: Math.max(0, bounds?.left ?? 0), right: Math.min(W, bounds?.right ?? W) };
+  box.style.width = ""; box.style.maxHeight = "";
+  const room = B.right - B.left - 2 * g;
+  if (box.offsetWidth > room) box.style.width = Math.max(220, room) + "px";
+  const w = box.offsetWidth;
   let x = null, y;
-  if (r.right + g + w <= W - g) x = r.right + g; else if (r.left - g - w >= g) x = r.left - g - w;
-  if (x != null) y = Math.max(g, Math.min(r.top, H - h - g));
-  else { x = Math.max(g, Math.min(r.left, W - w - g)); y = H - r.bottom >= r.top ? r.bottom + g : r.top - g - h; y = Math.max(g, Math.min(y, H - h - g)); }
-  box.style.left = Math.round(x) + "px"; box.style.top = Math.round(y) + "px";
+  if (r.right + g + w <= B.right - g) x = r.right + g; else if (r.left - g - w >= B.left + g) x = r.left - g - w;
+  if (x != null) { const h = box.offsetHeight; y = Math.max(g, Math.min(r.top, H - h - g)); }
+  else {
+    x = Math.max(B.left + g, Math.min(r.left, B.right - g - w));
+    const above = r.top - 2 * g, below = H - r.bottom - 2 * g, h0 = box.offsetHeight;
+    const up = h0 <= above || (h0 > below && above >= below);
+    box.style.maxHeight = Math.max(160, up ? above : below) + "px";
+    const h = Math.min(h0, box.offsetHeight);
+    y = up ? r.top - g - h : r.bottom + g;
+  }
+  box.style.left = Math.round(x) + "px"; box.style.top = Math.round(Math.max(g, y)) + "px";
+}
+/* The room a card may use: the item's panel, and for the buy order and your build also the list panel next to them (the place to
+   browse), so a card from the buy order opens beside it instead of over the next buy. Never the item details panel. */
+function tipBounds(t) {
+  const mod = t.closest(".mod, .overlay .sheet, .card"); if (!mod) return null;
+  const r = mod.getBoundingClientRect(), b = { left: r.left, right: r.right };
+  const lists = $("modLists");
+  if ((mod.id === "modOrder" || mod.id === "modBuild") && lists && lists.offsetParent) {
+    const l = lists.getBoundingClientRect();
+    if (l.left >= r.right - 1 && l.width > 0) b.right = l.right;   // only when the lists sit to the right (not stacked below)
+  }
+  return b;
 }
 function showTip(t) {
   const id = t?.dataset.tip, it = S.itemById[Number(id)];
@@ -5476,7 +5505,7 @@ function showTip(t) {
   TIP.open = { id, rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom } };
   const box = tipBox();
   box.replaceChildren(itemCardEl(it, t.dataset.tipTitle || ""));
-  box.hidden = false; placeTip(box, TIP.open.rect);
+  box.hidden = false; placeTip(box, TIP.open.rect, tipBounds(t));
 }
 function hideTip() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; TIP.open = null; const b = document.getElementById("itemTip"); if (b) b.hidden = true; tipRelease(); }
 function hideTipSoon() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; TIP.hide = setTimeout(hideTip, 150); }
@@ -5488,7 +5517,7 @@ function refreshTip() {
   const under = TIP.x >= 0 ? document.elementFromPoint(TIP.x, TIP.y)?.closest?.("[data-tip]") : null;
   if (under && under.dataset.tip === id && tipShowing()) tipTake(under);
 }
-/* The item an element belongs to, unless the pointer is on one of its buttons (Bought, Not for me: those have their own tooltip). */
+/* The item an element belongs to, unless the pointer is on one of its buttons (Bought, Skip: those have their own tooltip). */
 function tipFor(el) {
   const t = el?.closest?.("[data-tip]"); if (!t) return null;
   const ctl = el.closest("button, a, input, select, label");
@@ -5539,6 +5568,9 @@ window.addEventListener("scroll", () => { if (TIP.open || TIP.for) hideTip(); },
 new MutationObserver(() => { if (TIP.for && !TIP.for.isConnected) refreshTip(); }).observe(document.documentElement, { childList: true, subtree: true });
 
 function renderDetail(entry, souls, labelText, box = $("detail")) {
+  // The panel is redrawn as the match goes on: for the same item, keep where you'd scrolled to (v3.1.2).
+  const sameItem = entry && box.dataset.item === String(entry.s.item.id), keepScroll = sameItem ? box.scrollTop : 0;
+  box.dataset.item = entry ? String(entry.s.item.id) : "";
   box.replaceChildren();
   if (!entry) { box.innerHTML = `<p class="muted">Tap any item to see why it's recommended.</p>`; return; }
   const { s, kind } = entry;
@@ -5559,6 +5591,19 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   t.append(nm, tags);
   head.append(img(itemIcon(it)), t);
   box.append(head);
+  // What it does, first (v3.1.2, Moppy: what an item does matters before its numbers, especially to a beginner): the game-style
+  // card (v3.1; on a touch screen this is the tooltip's place), or the description as before.
+  const cm = itemCardModel(it, S.itemByClass, S.prog, S.itemById), text = itemText(it);
+  if (cm.innate.length || cm.blocks.length) {
+    const d = document.createElement("div"); d.className = "d-sec";
+    const h = document.createElement("h3"); h.textContent = "What it does";
+    const card = itemCardEl(it); card.classList.add("inline");
+    d.append(h, card); box.append(d);
+  } else if (text) {
+    const d = document.createElement("div"); d.className = "d-sec";
+    d.innerHTML = `<h3>What it does</h3><p class="small"></p>`;
+    d.lastChild.textContent = text; box.append(d);
+  }
   // The three-part explanation (v3.0) for anything in the plan or the lists (it starts with the verdict); the facts below are
   // the evidence. Owned items and items found by search keep the verdict alone.
   const three = kind !== "owned" && kind !== "search" && !!s.base;
@@ -5617,21 +5662,12 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   const patchRows = ch ? [[ch.long, null]] : [];
   for (const sec of [factList("Recent game update", patchRows), factList(three ? "Timing and value" : "Why now", now), factList("Upgrade path", pathRows), factList("Counters", counters), factList("Build fit", fits), factList(S.view?.match?.live === false ? "From this match" : "From the live match", live), factList("Enemy abilities (for information: the statistics already allow for them)", kitInfo), factList("Standard pick", std), factList("Watch out", warns), timeline.length > 1 ? factList("Timing (adjusted win rate vs items of the same tier)", timeline) : null]) if (sec) box.append(sec);
   if (!s.base && kind !== "owned" && kind !== "search") { const p = document.createElement("p"); p.className = "muted small"; p.textContent = "Not enough games to rate this item by itself."; box.append(p); }
-  // What it does: the game-style card (v3.1; on a touch screen this is the tooltip's place), or the description as before.
-  const cm = itemCardModel(it, S.itemByClass, S.prog, S.itemById), text = itemText(it);
-  if (cm.innate.length || cm.blocks.length) {
-    const d = document.createElement("div"); d.className = "d-sec";
-    const h = document.createElement("h3"); h.textContent = "What it does";
-    const card = itemCardEl(it); card.classList.add("inline");
-    d.append(h, card); box.append(d);
-  } else if (text) {
-    const d = document.createElement("div"); d.className = "d-sec";
-    d.innerHTML = `<h3>What it does</h3><p class="small"></p>`;
-    d.lastChild.textContent = text; box.append(d);
-  }
   if (!S.owned.has(it.id)) { const bb = buyButton(it, s.cost, `✓ Bought ${it.name}`); bb.style.justifySelf = "start"; box.append(bb); }
   // Full numbers and method, for when you want them
   const info = document.createElement("details"); info.className = "note";
+  // Stays open once opened (v3.1.2): the panel is redrawn every few seconds in a match, which used to close it again.
+  info.open = S.fullOpen === it.id;
+  info.addEventListener("toggle", () => { S.fullOpen = info.open ? it.id : null; });
   const sm = document.createElement("summary"); sm.textContent = "Show the full numbers"; info.append(sm);
   const ul = document.createElement("ul");
   detailLines(s, kind, souls, entry).forEach(h => { const li = document.createElement("li"); li.innerHTML = h; ul.append(li); });
@@ -5642,6 +5678,7 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   const st = document.createElement("span"); st.textContent = $("status").textContent;
   info.append(about, lab, st);
   box.append(info);
+  if (keepScroll) box.scrollTop = keepScroll;
 }
 
 const TABS = [
@@ -5997,7 +6034,7 @@ function showToast(text, { undo = null, more = null, moreLabel = "" } = {}) {
   toastTimer = setTimeout(() => { $("toast").hidden = true; undoState = null; toastUndo = null; toastMore = null; }, more ? 10000 : 6000);
 }
 
-/* ---------- Not for me (skipping a recommendation) ----------
+/* ---------- Skip ("Not for me" up to v3.1.1: skipping a recommendation) ----------
    Skipping an item leaves it out of every list and the buy order for the rest of this match, and the plan is worked
    out again from the current match state (not just the next item moved up). It doesn't touch your build or souls.
    Skips are kept with the match (a page reload keeps them) and cleared by New match. Each skip is also counted per
@@ -6371,26 +6408,21 @@ function renderNotes() {
   box.append(more);
 }
 $("reviewOpen").onclick = () => openReview();
-/* Light or dark (v3.1.1). Until you pick, the device setting decides (as before); the button switches to the other theme and the
-   choice is remembered in this browser; "Theme: follow my device" (under More) goes back to the device setting. */
-const deviceDark = () => !!window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-function themeNow() { const t = document.documentElement.dataset.theme; return t === "light" || t === "dark" ? t : deviceDark() ? "dark" : "light"; }
+/* Light or dark (v3.1.2: dark unless you pick light; one button, bottom-right; remembered in this browser). Up to v3.1.1 the device
+   setting decided until you picked, with "Theme: follow my device" under More; Moppy asked for one clear control. */
+function themeNow() { return document.documentElement.dataset.theme === "light" ? "light" : "dark"; }
 function applyTheme(t) {
-  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
-  store.set("theme", t === "light" || t === "dark" ? t : null);
+  document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+  store.set("theme", themeNow());
   renderThemeToggle();
 }
 function renderThemeToggle() {
   const dark = themeNow() === "dark", b = $("themeToggle");
   b.firstChild.textContent = dark ? "☀" : "☾";
-  b.lastChild.textContent = "Dark mode";   // a toggle: its name stays, aria-pressed says whether it's on
   b.title = dark ? "Switch to light mode" : "Switch to dark mode";
-  b.setAttribute("aria-pressed", String(dark));
-  $("themeAuto").hidden = !document.documentElement.dataset.theme;
+  b.setAttribute("aria-pressed", String(dark));   // a toggle named "Dark mode": pressed when dark
 }
 $("themeToggle").onclick = () => applyTheme(themeNow() === "dark" ? "light" : "dark");
-$("themeAuto").onclick = () => applyTheme(null);
-window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", renderThemeToggle);
 renderThemeToggle();
 // The More menu closes after a choice, a click elsewhere, or Escape.
 document.querySelectorAll("#moreMenu .linkbtn").forEach(b => b.addEventListener("click", () => { $("moreMenu").open = false; }));
@@ -6402,9 +6434,6 @@ $("reviewGo").onclick = () => runReview();
 $("reviewMatch").onkeydown = e => { if (e.key === "Enter") runReview(); };
 $("notesOpen").onclick = () => { renderNotes(); $("notesOverlay").hidden = false; $("notesClose").focus(); };
 $("welcomeClose").onclick = () => { $("welcome").hidden = true; store.set("welcomed", true); };
-$("glossOpen").onclick = () => { $("glossOverlay").hidden = false; $("glossClose").focus(); };
-$("glossClose").onclick = () => { $("glossOverlay").hidden = true; };
-$("glossOverlay").onclick = e => { if (e.target === $("glossOverlay")) $("glossOverlay").hidden = true; };
 // Match view or full view (v3.0), remembered.
 $("viewToggle").onclick = () => { S.compact = !S.compact; store.set("compact", S.compact); renderMatchView(); if (!S.compact) renderBoard(); };
 $("notesClose").onclick = () => { $("notesOverlay").hidden = true; };
@@ -6449,10 +6478,38 @@ $("fbCopy").onclick = async () => {
 $("closePicker").onclick = () => { $("pickerOverlay").hidden = true; };
 $("pickerOverlay").onclick = e => { if (e.target === $("pickerOverlay")) $("pickerOverlay").hidden = true; };
 document.addEventListener("keydown", e => { if (e.key === "Escape" && (TIP.for || !document.getElementById("itemTip")?.hidden)) { hideTip(); TIP.quiet = true; } });
-document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay", "reviewOverlay", "glossOverlay"].forEach(id => { $(id).hidden = true; }); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay", "reviewOverlay"].forEach(id => { $(id).hidden = true; }); });
 $("toastUndo").onclick = () => (toastUndo || undoBought)();
 $("toastMore").onclick = () => { const f = toastMore; toastMore = null; $("toast").hidden = true; if (f) f(); };
 $("clockStart").onclick = () => { S.clockStart = Date.now(); S.clockStartedOnce = true; S.soulOffset = 0; saveMatch(); tickClock(); loadCurve(); updateSouls(true); };
+/* Typing the match time (v3.1.2): click the clock, type minutes:seconds (or just minutes), Enter. With a live match the clock
+   follows the broadcast, which runs 1 to 2 minutes behind your game: the time you type sets how far ahead your game is, and that
+   stays as the broadcast moves on (like ±1 min). Without one, the clock simply jumps to it (and starts if it wasn't running). */
+function parseClock(text) {
+  const m = /^\s*(\d{1,2})(?:[:.](\d{1,2}))?\s*$/.exec(String(text || ""));
+  if (!m || (m[2] != null && +m[2] > 59)) return null;
+  return +m[1] * 60 + (m[2] != null ? +m[2] : 0);
+}
+function setClockTo(sec) {
+  const bt = LIVE.id && LIVE.rosterState?.state !== "ended" ? broadcastGameTime() : null;
+  if (bt != null) S.clockAdjust = Math.round(sec - bt);
+  else { S.clockStart = Date.now() - sec * 1000; S.clockStartedOnce = true; S.clockEstimated = false; }
+  saveMatch(); tickClock(); renderResults();
+}
+$("clockTime").onclick = () => {
+  const inp = $("clockInput"), sec = clockSeconds();
+  inp.value = sec == null ? "" : `${Math.floor(sec / 60)}:${String(Math.floor(sec) % 60).padStart(2, "0")}`;
+  $("clockTime").hidden = true; inp.hidden = false; inp.focus(); inp.select();
+};
+function closeClockInput(commit) {
+  const inp = $("clockInput"); if (inp.hidden) return;
+  const sec = commit ? parseClock(inp.value) : null;
+  inp.hidden = true; $("clockTime").hidden = false;
+  if (sec != null) setClockTo(sec);
+  else if (commit && inp.value.trim()) showToast("Type the match time as minutes:seconds, for example 12:30.");
+}
+$("clockInput").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); closeClockInput(true); $("clockTime").focus(); } else if (e.key === "Escape") { e.stopPropagation(); closeClockInput(false); $("clockTime").focus(); } };
+$("clockInput").onblur = () => closeClockInput(true);
 $("clockMinus").onclick = () => { if (S.clockSynced) S.clockAdjust = (S.clockAdjust || 0) - 60; else S.clockStart += 60000; saveMatch(); tickClock(); };
 $("clockPlus").onclick = () => { if (S.clockSynced) S.clockAdjust = (S.clockAdjust || 0) + 60; else S.clockStart -= 60000; saveMatch(); tickClock(); };
 $("clockStop").onclick = () => { S.clockStart = null; saveMatch(); tickClock(); updateSouls(true); };
