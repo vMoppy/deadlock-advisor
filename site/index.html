@@ -421,7 +421,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.2.2</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.2.3</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -711,10 +711,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.2.2";   // shown in the top bar and written into match records
+const VERSION = "v3.2.3";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.2.3", date: "October 17, 2026", items: [
+    "When the data service can't watch matches (it needs the latest game update), the tool remembers for 20 minutes and pressing Connect again no longer uses up one of your 6 connections an hour. Press it a second time to try anyway.",
+    "Connect to my next match by itself no longer retries a match it just failed on every 20 seconds (that could use up the hour's connections in two minutes)."] },
   { v: "v3.2.2", date: "October 17, 2026", items: [
     "When a live match ends, the match clock and souls stop at their final values instead of counting on (souls are marked \"final\"). ±1 min and typing the time still work. Reconnect or the next match brings them back to life."] },
   { v: "v3.2.1", date: "October 17, 2026", items: [
@@ -4258,7 +4261,11 @@ async function watchTick() {
   if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
   try {
     const m = await lookupActiveMatch(S.steam.accountId);
-    if (m && String(m.match_id) !== String(LIVE.id || "") && String(m.match_id) !== String(S.endedMatchId || "")) {
+    // A match the tool already failed to connect to isn't tried again by itself for 10 minutes (v3.2.3): up to v3.2.2 the watch
+    // found it again every 20 s and each try used one of the 6 connections an hour, so a refusal emptied the hour in two minutes.
+    const tried = (S.linkTried || {})[String(m?.match_id)];
+    const recentFail = tried && !tried.ok && Date.now() - tried.at < 600000;
+    if (m && !recentFail && String(m.match_id) !== String(LIVE.id || "") && String(m.match_id) !== String(S.endedMatchId || "")) {
       $("matchId").value = m.match_id;
       await linkMatch({ id: String(m.match_id), active: m });
     }
@@ -4272,6 +4279,14 @@ setInterval(watchTick, WATCH_MS);
 const SPECTATE_PER_HOUR = 6;
 function spectateLog() { const now = Date.now(); return (store.get("spectates") || []).filter(t => now - t < 3600000); }
 function spectatesUsed() { return spectateLog().length; }
+/* The data service can't watch any match right now (v3.2.3): it needs the latest game update (k_eInvalidClientVersion), or the
+   game has switched watching off (k_eDisabled). Every try would fail and still use one of the 6 connections an hour, so for
+   20 minutes after such an answer the tool doesn't spend one by itself: Connect explains, and a second press tries anyway.
+   Moppy, October 17: four presses during a game update left 2 of 6. A connection that works clears it. */
+const SERVICE_BLOCK_MS = 20 * 60000;
+const SERVICE_WIDE = new Set(["k_eInvalidClientVersion", "k_eDisabled"]);
+function serviceBlock() { const b = store.get("svcBlock"); return b && Date.now() - b.at < SERVICE_BLOCK_MS ? b : null; }
+function noteLinkTry(id, ok) { (S.linkTried ||= {})[String(id)] = { at: Date.now(), ok }; }
 
 /* A different match than the one saved: start its state fresh (items, sold list, holds, clock), but
    keep your hero, Steam account and settings. */
@@ -4354,6 +4369,18 @@ async function linkSteps(id, opts) {
     const saved = store.get("live-" + id);
     if (saved && Date.now() - saved.at < 3 * 3600000) LIVE.url = saved.url;
     else {
+      const block = serviceBlock();
+      if (block) {
+        const armed = LIVE.tryAnyway && LIVE.tryAnyway.id === id && Date.now() - LIVE.tryAnyway.at < 60000;
+        if (opts.active || opts.auto || !armed) {
+          if (!opts.active && !opts.auto) LIVE.tryAnyway = { id, at: Date.now() };
+          const mins = Math.max(1, Math.round((Date.now() - block.at) / 60000)), left = Math.max(0, SPECTATE_PER_HOUR - spectatesUsed());
+          tlMark("held: " + block.reason);
+          throw Object.assign(new Error(`${block.text} (The data service said so ${mins} min ago, so no connection was used.)` + (opts.active || opts.auto ? "" : ` Press Connect again within a minute to try anyway: that uses one of your ${left} connections left this hour.`)),
+            { short: block.short, temporary: true, held: true });
+        }
+        LIVE.tryAnyway = null;
+      }
       const log = spectateLog();
       if (log.length >= SPECTATE_PER_HOUR) {
         const mins = Math.max(1, Math.ceil((log[0] + 3600000 - Date.now()) / 60000));
@@ -4368,6 +4395,7 @@ async function linkSteps(id, opts) {
         const body = await res.text().catch(() => "");
         if (stale()) return;
         const fail = spectateFailure(res.status, body);
+        if (SERVICE_WIDE.has(fail.reason)) store.set("svcBlock", { at: Date.now(), reason: fail.reason, short: fail.short, text: fail.text });
         const left = Math.max(0, SPECTATE_PER_HOUR - spectatesUsed());
         // A temporary refusal is tried once more by itself after a pause (at most LINK_RETRY.max times per match, and
         // never with the last connection of the hour). Pressing Connect still tries straight away.
@@ -4383,16 +4411,18 @@ async function linkSteps(id, opts) {
       }
       const url = (await res.json()).broadcast_url;
       if (stale()) return;
+      store.set("svcBlock", null);   // the data service is watching matches again
       LIVE.url = url;
       if (!LIVE.url) throw new Error("The data service didn't return a broadcast for this match. Try again in a minute.");
       store.set("live-" + id, { at: Date.now(), url: LIVE.url });
     }
-    LIVE.connecting = false; tlMark("broadcast address");
+    LIVE.connecting = false; tlMark("broadcast address"); noteLinkTry(id, true);
     liveStatus("Connected. Waiting for the broadcast to start, which can take up to a minute…");
     startRosterStream();
   } catch (e) {
     if (stale()) return;
     LIVE.connecting = false;
+    noteLinkTry(id, false);
     const text = /Failed to fetch|NetworkError/.test(e.message) ? "Couldn't reach the data service. Check your internet connection." : e.message;
     // The step shows the short reason, the message below it the whole explanation and what to do. A temporary
     // problem is amber, one that won't go away by waiting is red.
