@@ -358,6 +358,9 @@
   /* Three-part explanation (v3.0): why this item, why now, what you'd give up. */
   .three { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; margin: 8px 0 4px; }
   .three dt { font-weight: 700; } .three dd { margin: 0; }
+  .three-long { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; margin: 6px 0 0; } .three-long dt { font-weight: 700; } .three-long dd { margin: 0; }
+  @media (max-width: 480px) { .three-long { grid-template-columns: minmax(0, 1fr); gap: 1px; } }
+  .three-more { margin: 2px 0 4px; } .pct-note { margin: 2px 0 6px; }
   @media (max-width: 480px) { .three { grid-template-columns: minmax(0, 1fr); gap: 1px; } .three dd { margin-bottom: 5px; } }
   /* Phone widths (v3.0): a dropdown is as wide as its longest option, which pushed the setup card past a 360 px screen. */
   select { max-width: 100%; min-width: 0; }
@@ -421,7 +424,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.2.3</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.3</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -711,10 +714,15 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.2.3";   // shown in the top bar and written into match records
+const VERSION = "v3.3";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.3", date: "October 17, 2026", items: [
+    "Shorter text. Above the buy order: one line each for your lane, your hard matchups and what stands out about their team (hover for the details).",
+    "Item details: Why this item, Why now and What you'd give up as one short line each; the longer explanation is under More detail, and what a percentage means is said once.",
+    "Reasons in plain words with the number in brackets, for example \"Venator players win more with it now (+1.4%)\" or \"A usual buy at this stage: healing\".",
+    "Match builds says what it's for: checking that the tool reads everyone's items correctly."] },
   { v: "v3.2.3", date: "October 17, 2026", items: [
     "When the data service can't watch matches (it needs the latest game update), the tool remembers for 20 minutes and pressing Connect again no longer uses up one of your 6 connections an hour. Press it a second time to try anyway.",
     "Connect to my next match by itself no longer retries a match it just failed on every 20 seconds (that could use up the hour's connections in two minutes)."] },
@@ -5487,16 +5495,27 @@ function renderReview() {
   note.textContent = "Differing from the tool isn't a mistake in itself: you saw the fight, it saw the statistics. Use the differences to ask why. The review replays the tool as it is now, with today's statistics, so it can differ a little from what you saw during the match.";
   box.append(note);
 }
+/* What an item is for, in two or three words (v3.3), from what the tool reads in its stats, else its shop category. */
+const ROLE_WORDS = { sustain: "healing", bulletRes: "bullet resist", spiritRes: "spirit resist", cleanse: "debuff protection", cc: "crowd control",
+  antiheal: "healing reduction", bulletShred: "lowers their bullet resist", spiritShred: "lowers their spirit resist", slow: "slows", invest: "builds value over time" };
+function itemRole(it) {
+  if (!it) return "";
+  const r = [...tagsOf(it)].map(t => ROLE_WORDS[t]).filter(Boolean).slice(0, 2);
+  if (r.length) return r.join(", ");
+  return { weapon: "more gun damage", spirit: "more spirit damage", vitality: "survivability" }[it.item_slot_type] || "";
+}
 function shortReason(s, kind, why, opts = {}) {
   if (why) return why;
   const fitText = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 2)
-    .map(f => `${pts(f.lift)}% with ${itemName(f.anchorId)}`);
-  if (kind === "build") return fitText.join(" · ") || "Fits your build";
+    .map(f => `${itemName(f.anchorId)} (${pts(f.lift)}%)`);
+  if (kind === "build") return fitText.length ? `Works well with your ${fitText.join(", ")}` : "Fits your build";
   // Timing belongs to "Why now" in the details (v3.2.1: it made "Why this item" repeat it); the list rows keep it.
   if (opts.timing !== false && s.timing?.kind === "early" && (s.timing.factor < 0.75 || kind === "core")) return "Best bought early: " + (s.timing.factor < 0.999 ? "less value left this late" : "worth less bought now");
   if (kind === "core" || kind === "part") {
-    if (s.adj >= 0.004) return `Strong ${heroName(S.me)} pick now: ${pts(s.adj)}% win rate (adjusted)`;
-    return s.base ? `Standard pick, usually bought around minute ${Math.round(s.base.avg_buy_time_s / 60)}` : "Standard pick";
+    // v3.3: plain words, the number in brackets (what it means is said under the explanations).
+    if (s.adj >= 0.004) return `${heroName(S.me)} players win more with it now (${pts(s.adj)}%)`;
+    if (opts.timing === false || !s.base) return `A usual ${heroName(S.me)} buy at this stage${itemRole(s.item) ? ": " + itemRole(s.item) : ""}`;
+    return `A usual buy, around minute ${Math.round(s.base.avg_buy_time_s / 60)}`;
   }
   // What it counters and how directly (v3.2): "Direct counter: answers ...", "General defence", or what the statistics say.
   const how = counterHow(s, tagsOf(s.item));
@@ -5787,6 +5806,25 @@ function threeList(tp, long, cls = "three") {
     dl.append(dt, dd);
   }
   return dl;
+}
+/* The details' three parts (v3.3, Moppy, October 17: too wordy to read in a match): the short line of each, readable at a
+   glance; the longer explanation one tap away under "More detail" (kept open for the same item, like the full numbers); and
+   what a percentage means, said once. */
+function threeBlock(tp, itemId) {
+  const wrap = document.createElement("div");
+  wrap.append(threeList(tp, false));
+  const more = document.createElement("details"); more.className = "note three-more";
+  more.open = S.moreOpen === itemId;
+  more.addEventListener("toggle", () => { S.moreOpen = more.open ? itemId : null; });
+  const sm = document.createElement("summary"); sm.textContent = "More detail";
+  more.append(sm, threeList(tp, true, "three-long"));
+  wrap.append(more);
+  if ([...tp.why, ...tp.now, ...tp.give].some(t => /[+−-]\d+(\.\d)?%/.test(t))) {
+    const p = document.createElement("p"); p.className = "muted small pct-note";
+    p.textContent = "A percentage like (+1.4%) is how much more often players who bought it won than with similar choices. Show the full numbers, below, says exactly what each is compared with.";
+    wrap.append(p);
+  }
+  return wrap;
 }
 /* The one alert that matters now, or null: dead (shop now), the Egg ready to hatch, slots full for an affordable buy, the
    next buy affordable, souls held unspent for 2 minutes. Worked out from the current state each time, so an alert clears by
@@ -6079,7 +6117,7 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   // the evidence. Owned items and items found by search keep the verdict alone.
   // v3.2.1: for every item (owned, from search or Match builds, or with few games too), always right under "What it does".
   const three = true;
-  box.append(threeList(threeParts(entry, souls), true));
+  box.append(threeBlock(threeParts(entry, souls), it.id));
   if (skippedNow().has(it.id) && !S.owned.has(it.id)) {
     const always = ((store.get("skipAlways") || {})[S.me] || []).includes(it.id);
     const p = document.createElement("p"); p.className = "small warn-text";
@@ -6133,7 +6171,7 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   if (!s.base && kind !== "owned" && kind !== "search") { const p = document.createElement("p"); p.className = "muted small"; p.textContent = "Not enough games to rate this item by itself."; box.append(p); }
   if (!S.owned.has(it.id)) { const bb = buyButton(it, s.cost, `✓ Bought ${it.name}`); bb.style.justifySelf = "start"; box.append(bb); }
   // Full numbers and method, for when you want them
-  const info = document.createElement("details"); info.className = "note";
+  const info = document.createElement("details"); info.className = "note fullnums";
   // Stays open once opened (v3.1.2): the panel is redrawn every few seconds in a match, which used to close it again.
   info.open = S.fullOpen === it.id;
   info.addEventListener("toggle", () => { S.fullOpen = info.open ? it.id : null; });
@@ -6157,7 +6195,7 @@ const TABS = [
   ["core", "Standard", "Best value for your hero at this stage, adjusted for how far ahead buyers were"]
 ];
 const TAB_KIND = { counters: "counter", build: "build", situational: "weak", core: "core" };
-const LIVE_TAB = ["players", "Match builds", "What every player owns, from the live match (about 1 to 2 minutes behind)"];
+const LIVE_TAB = ["players", "Match builds", "What the tool thinks everyone owns, from the live match (1 to 2 minutes behind). Use it to check items are read correctly: ⚑ marks the enemy items it reacts to."];
 
 /* Every player's build from the live match: makes visible what the tool has detected. */
 function renderPlayers(box) {
@@ -6320,6 +6358,18 @@ function renderOrderAge() {
 setInterval(renderOrderAge, 5000);
 // The match view's alert can change with time alone (souls held for 2 minutes, the respawn countdown): redrawn only when it does.
 setInterval(() => { if (!S.compact || !S.active || !S.view) return; const a = currentAlert(); if ((a?.text || "") !== ($("mvAlert").hidden ? "" : $("mvAlert").textContent)) renderMatchView(); }, 5000);
+/* What stands out about the enemy team, in a few words (v3.3), from the same match read-out as before. */
+const NEED_WORDS = { antiheal: "healing items", cleanse: "crowd-control items", bulletRes: "heavy gun damage", spiritRes: "heavy spirit damage",
+  bulletShred: "high bullet resist", spiritShred: "high spirit resist", "kit:cc": "lots of crowd control", "kit:sustain": "lots of healing", "kit:slow": "lots of slows" };
+const NEED_FEWER = { "kit:cc": "little crowd control", "kit:sustain": "little healing", "kit:slow": "few slows" };
+function matchShort(match) {
+  const n = match.needs || {}, out = [];
+  for (const k of ["antiheal", "cleanse", "bulletRes", "spiritRes", "bulletShred", "spiritShred"]) if (n[k] && n[k].strength >= 0.3) out.push(NEED_WORDS[k]);
+  for (const k of ["kit:cc", "kit:sustain", "kit:slow"]) if (n[k] && Math.abs(n[k].strength) >= 0.3) out.push(n[k].strength > 0 ? NEED_WORDS[k] : NEED_FEWER[k]);
+  const ahead = [...(match.fed || [])].filter(([, f]) => f.rel >= 1.25).sort((a, b) => b[1].rel - a[1].rel).slice(0, 2).map(([e]) => heroName(e));
+  if (ahead.length) out.push(`${ahead.join(" and ")} ahead`);
+  return out.length ? out.join(" · ") : "nothing that needs a special answer";
+}
 function renderBoard() {
   if (!S.view) return;
   const { souls, order, groups, scoredById, label, threat, match, empty } = S.view;
@@ -6334,17 +6384,21 @@ function renderBoard() {
     if (ahead.length) mr.push(ahead.map(([e, f]) => `${heroName(e)} is ${Math.round((f.rel - 1) * 100)}% above the match average`).join(", "));
     if (!mr.length) mr.push(match.live ? `${match.enemyItemCount} enemy items read, nothing that needs a special answer yet` : "the enemy heroes' abilities are about average: nothing that needs a special answer");
   }
+  // v3.3 (Moppy, October 17: too much to read during a match): one short line each; the full read-out is the line's tooltip.
   $("matchRead").hidden = !match;
-  $("matchRead").textContent = match ? (match.live ? "Live match: " : "This match: ") + mr.join(" · ") : "";
-  // Lane opponents, in full, with where they came from.
+  $("matchRead").textContent = match ? "Their team: " + matchShort(match) : "";
+  $("matchRead").title = match ? (match.live ? "Live match: " : "This match: ") + mr.join(" · ") : "";
+  // Lane opponents, with where they came from.
   const laneIds = S.enemies.filter(e => S.lane.has(e));
   $("laneRead").hidden = !laneIds.length;
   const laneFromMatch = !!LIVE.id && !!LIVE.laneSig && LIVE.laneApplied === [...S.lane].sort().join(",");
-  $("laneRead").textContent = laneIds.length ? `Lane opponent${laneIds.length > 1 ? "s" : ""}: ${listNames(laneIds)} (${laneFromMatch ? "from the match" : "set by hand"})` : "";
-  // Toughest matchups, so the reason behind counter picks is visible at a glance.
+  $("laneRead").textContent = laneIds.length ? `Lane: ${laneIds.map(heroName).join(", ")} (${laneFromMatch ? "from the match" : "set by hand"})` : "";
+  $("laneRead").title = laneIds.length ? `Lane opponent${laneIds.length > 1 ? "s" : ""}: ${listNames(laneIds)}` : "";
+  // Toughest matchups, so the reason behind counter picks is visible at a glance; the win rates in the tooltip.
   const tough = [...threat].filter(([, t]) => t.wr < 0.5).sort((a, b) => a[1].wr - b[1].wr).slice(0, 3);
   $("threats").hidden = !tough.length;
-  $("threats").textContent = tough.length ? "Toughest matchups for you: " + tough.map(([e, t]) => `${heroName(e)} ${pct(t.wr).replace(".0%", "%")}`).join(" · ") : "";
+  $("threats").textContent = tough.length ? "Hard matchups: " + tough.map(([e]) => heroName(e)).join(", ") : "";
+  $("threats").title = tough.length ? `Your hero's win rate against each: ${tough.map(([e, t]) => `${heroName(e)} ${pct(t.wr).replace(".0%", "%")}`).join(", ")}` : "";
 
   // Buy order
   const ol = $("orderList"); ol.replaceChildren();
