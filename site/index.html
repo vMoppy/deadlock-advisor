@@ -109,6 +109,7 @@
   .updnote.ok .dot { background: var(--good); } .updnote.new .dot { background: var(--bad); }
   .updnote.new { color: var(--bad); font-weight: 600; }
   .slotline label { font-weight: 400; font-size: inherit; } .slotline select { font-size: 12.5px; padding: 1px 4px; }
+  .buildkind { margin: 2px 0 0; }
   .eggnote { border-left: 3px solid var(--accent); padding: 2px 0 2px 8px; }
   .eggnote[data-action="hatch"] { border-color: var(--good); font-weight: 600; }
   .deadnote { border-left: 3px solid var(--good); padding: 2px 0 2px 8px; font-weight: 600; }
@@ -424,7 +425,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.3</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.4</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -648,6 +649,7 @@
       <div id="buildResults" class="scroll" hidden></div>
       <div id="ownedChips" class="chips"></div>
       <div id="slotLine" class="small slotline"></div>
+      <p id="buildKind" class="small muted buildkind"></p>
       <p id="eggNote" class="small eggnote" hidden></p>
       <div id="soldStrip" hidden></div>
       <p class="muted small" id="soulsHint">Start the match clock and souls fill in by themselves.</p>
@@ -714,10 +716,15 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.3";   // shown in the top bar and written into match records
+const VERSION = "v3.4";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.4", date: "October 18, 2026", items: [
+    "The tool reads your build: gun, spirit, hybrid or still developing (shown under your items). Once you've committed, big items of the other kind are suggested only when something in the match calls for them, and the explanation says what.",
+    "Fewer green items in a row: a survival item counts less once you already have more than players of your hero usually do, and more when you have few. Green items that counter the enemy team still come first.",
+    "Live Match: matches the data service already watches connect without using one of your connections; a refused connection says which limit it was and when the next one frees up; reconnects after a broadcast break take about 2 seconds instead of 10.",
+    "Fixed: the end of a match showing \"didn't accept the tool's request\", and the match end not being recognised in long matches."] },
   { v: "v3.3", date: "October 17, 2026", items: [
     "Shorter text. Above the buy order: one line each for your lane, your hard matchups and what stands out about their team (hover for the details).",
     "Item details: Why this item, Why now and What you'd give up as one short line each; the longer explanation is under More detail, and what a percentage means is said once.",
@@ -903,6 +910,47 @@ const OWN_CTR_AT_PURCHASE = { on: true };
    with winning more often than the situation predicted in 13 of 14 samples (10 before). */
 const ADJ_W = [0.65, 0.45, 0.2, 0.2];   // stage value, per stage column (0-9, 9-20, 20-30, 30+ min)
 const FIT_W = 0.1;                      // build fit
+/* Build fit by kind (v3.4, see catFit): how gun, spirit or survival items as a whole do for players who own your items. Pooling a
+   whole kind adds up the games that one item alone doesn't have: for gun McGinnis players most spirit items have under 40 games
+   each, so item by item the fit said nothing (Moppy's October 17 match: Boundless Spirit first at 29:36 with 20,800 souls in gun
+   items and none in spirit), while pooled, players owning Tesla Bullets did 1.7 points worse than usual with spirit items (about
+   7,000 games) and 1 point better with gun items. TAU_CAT: how much such effects really vary (1.5 points). CAT_MIN_ITEM: an item
+   needs this many games with your item to count in its kind's pool. Weight and size checked on the backtest (roadmap, v3.4). */
+const TAU_CAT = 0.015, CAT_FIT_W = 1, CAT_MIN_ITEM = 10;
+/* Which kinds and stages it counts for, measured on the backtest (75,000 players; "advice edge": how much more often players
+   who bought the tool's suggestion won than the match situation predicted). Gun and spirit only: counting survival items too
+   lowered the edge (top 4: 1.85 to 1.60 points), and their own rule is VIT_SAT. Not after 20 minutes: there it lowered the edge
+   from 1.56 to 0.96 (owning big items late mostly means being ahead, which the shared shift doesn't fully remove). Before 20
+   minutes it raised the mid game's first-step edge (1.34 to 2.81). A committed build's off-kind items keep their own rule
+   (BUILD_ID) at every stage, and once your build is committed (gun or spirit, see BUILD_ID) the fit by kind counts after 20
+   minutes too ("committed"): that's where your direction matters most (Moppy's gun McGinnis at 30 minutes). */
+const CAT_KINDS = ["weapon", "spirit"];
+const CAT_PHASE_W = { lane: 1, mid: 1, late: 0, committed: 1 };
+/* How many survival items you already have (v3.4, see survivalPenalty). Measured on the backtest matches (75,000 players, about
+   1.1 million purchases, every hero, October 2026): a survival purchase compared with a gun or spirit purchase by players of the
+   same hero, at the same stage and net worth, with the same share of souls already in survival items (relative to the hero's
+   usual share then). The stage value already holds the average difference; what changes with the share, in win-rate points:
+     stage    first items   under half usual   about usual   1.2 to 2 times usual
+     0-9 min     -0.4            +0.3              +0.7            -0.2
+     9-20         -               +0.9               0              -0.9
+     20-30        -               +1.5               0              -1.0
+     30+          -               +1.3             -0.4             +0.6 (no "too many" late)
+   So: with few survival items, another one is worth more (bonus); with more than usual, less (pen), mostly between 9 and 30 min;
+   and in lane a survival item as one of your very first items (under minSpend souls in items) is a little worse (first). Gun and
+   spirit items showed nothing like it. Per stage column, taken at about 80% of the measured size (their uncertainty is 0.3 to
+   0.6 points). The bonus is full up to low[0] times the usual share and gone at low[1]; the penalty starts at high[0] and is
+   full at high[1]. */
+const VIT_SAT = { low: [0.25, 0.6], high: [1.1, 1.5], minSpend: 1500,
+  bonus: [0.002, 0.007, 0.012, 0.01], pen: [0.002, 0.007, 0.008, 0], first: [0.003, 0, 0, 0] };
+/* Your build (v3.4, see buildIdentity): still developing until minDamage souls are in gun and spirit items, then gun or spirit when
+   at least "committed" of those souls are in one kind, otherwise hybrid. A committed build's big items of the other kind (tier
+   bigTier and up) are planned only with a reason in this match (Moppy, October 17: "there should be a clear gameplay reason for
+   recommending a significant investment outside my established build"). */
+const BUILD_ID = { minDamage: 6000, committed: 0.7, bigTier: 3 };
+/* Switches for measuring each v3.4 part on the backtest: popularity among players of your build (buildPopularity), and the anchor
+   choice (fitAnchorIds; off: your three most expensive items, as up to v3.3). */
+const BUILD_POP = { on: true };
+const FIT_ANCHORS = { v34: true };
 const POP_PRIOR = 0.002;     // popularity at this stage: weak evidence (at most +0.2 pts), breaks near-ties
 const RARE_STAGE_SHARE = 0.25;   // bought at this stage by under a quarter of the usual share -> "rarely bought this late"
 /* Items your hero rarely buys need stronger evidence. Few buyers means noisier numbers, the players who pick an
@@ -1079,9 +1127,20 @@ function spectateFailure(status, body = "") {
   const msg = typeof error === "string" ? error : "";
   if (status === 429) {
     const secs = Number(error?.next_request_in);
-    const mins = Number.isFinite(secs) && secs > 0 ? Math.max(1, Math.ceil(secs / 60)) : null;
-    return { reason: "limit", short: "This hour's match connections are used up", retry: false,
-      text: `The data service's limit of 6 new matches an hour (per internet connection) is used up. ${mins ? `The next one frees up in about ${mins} min.` : "Try again in a few minutes."}` };
+    const ok = Number.isFinite(secs) && secs > 0;
+    const at = ok ? new Date(Date.now() + secs * 1000).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" }) : null;
+    const when = ok ? ` The next one frees up at about ${at} (${Math.max(1, Math.ceil(secs / 60))} min).` : " Try again in a few minutes.";
+    const type = String(error?.type || "");
+    const limit = Number(error?.quota?.limit) || null, period = Number(error?.quota?.period) || null;
+    const info = { type: type || null, limit, period, requests: Number(error?.requests) || null, wait: ok ? secs : null };
+    if (/^global$/i.test(type)) {
+      const span = period ? (period >= 3600 ? `${Math.round(period / 3600)} hour` : `${Math.round(period / 60)} minutes`) : null;
+      return { reason: "limit-global", short: "The data service is at its limit for all users", retry: false, ...info,
+        text: `The data service has a limit for all its users together${limit && span ? ` (${limit} new matches every ${span})` : ""}, and it's reached right now. That isn't about your connections.` + when };
+    }
+    const n = limit || SPECTATE_PER_HOUR;
+    return { reason: "limit", short: "This hour's match connections are used up", retry: false, ...info,
+      text: `The data service's limit of ${n} new matches an hour for your internet connection is used up. It counts every copy of the tool and every device on your connection (the downloaded file and the web version keep separate counts here), and refused tries count too.` + when };
   }
   if (status === 400 && /cannot be live/i.test(msg)) return { reason: "old", short: "That match started over 4 hours ago", retry: false,
     text: "That match ID is from a match that started more than 4 hours ago, so it can't be live. Check the number in the bottom-right corner of your screen." };
@@ -1338,6 +1397,135 @@ function buildFit(baseline, perAnchor) {
   return fit;
 }
 
+/* Build fit by kind (v3.4): for each of your anchor items, how gun, spirit and survival items as a whole do among players who own
+   it, compared with how the same items do normally, after the same shared shift as buildFit (owning a big item usually means
+   being ahead). Every item of a kind with CAT_MIN_ITEM games or more counts, weighted by its games, so thin items add up.
+   Returns { anchorId: { weapon|spirit|vitality: { lift, se, n, items } } }; a kind needs MIN_GAMES games over 3 items or more. */
+const KINDS = ["weapon", "spirit", "vitality"];
+function catFit(baseline, perAnchor, itemById) {
+  const base = new Map(baseline.map(r => [r.item_id, r]));
+  const out = {};
+  for (const { anchorId, rows } of perAnchor) {
+    const pairs = (rows || []).map(r => ({ r, b: base.get(r.item_id), it: itemById[r.item_id] }))
+      .filter(x => x.b && x.it && x.r.item_id !== anchorId && x.b.matches >= MIN_GAMES && x.r.matches > 0);
+    const forShift = pairs.filter(x => x.r.matches >= MIN_GAMES);
+    if (forShift.length < 5) continue;
+    const shift = weightedMedian(forShift.map(x => [wr(x.r) - wr(x.b), x.r.matches]));
+    const acc = {};
+    for (const { r, b, it } of pairs) {
+      const k = it.item_slot_type;
+      if (r.matches < CAT_MIN_ITEM || !CAT_KINDS.includes(k)) continue;
+      const a = acc[k] ||= { w: 0, e: 0, v: 0, n: 0, items: 0 };
+      const p = Math.min(0.99, Math.max(0.01, wr(b) + shift));
+      a.w += r.wins; a.e += r.matches * p; a.v += r.matches * p * (1 - p); a.n += r.matches; a.items++;
+    }
+    const kinds = {};
+    for (const [k, a] of Object.entries(acc)) if (a.n >= MIN_GAMES && a.items >= 3) kinds[k] = { lift: (a.w - a.e) / a.n, se: Math.sqrt(a.v) / a.n, n: a.n, items: a.items };
+    out[anchorId] = kinds;
+  }
+  return out;
+}
+/* One kind's build fit over the anchors you own: their average weighted by precision. The anchors' players overlap a lot, so it's
+   taken as no more certain than the best single anchor. score: shrunk by TAU_CAT (win-rate points); null without data. */
+function catFitFor(cf, kind, owned) {
+  let sw = 0, sl = 0, minSe = Infinity, n = 0;
+  const anchors = [];
+  for (const [a, kinds] of Object.entries(cf || {})) {
+    if (!owned.has(Number(a)) && !owned.has(a)) continue;
+    const x = kinds?.[kind]; if (!x || !(x.se > 0)) continue;
+    const w = 1 / (x.se * x.se); sw += w; sl += w * x.lift; minSe = Math.min(minSe, x.se); n += x.n; anchors.push(Number(a));
+  }
+  if (!sw) return null;
+  const lift = sl / sw;
+  return { lift, se: minSe, z: lift / minSe, score: lift * trust(minSe, TAU_CAT), n, anchors };
+}
+/* How common each item is among players who own your anchor items (v3.4): for each anchor with MIN_GAMES games or more for its most
+   bought companion, an item's games with it compared with that companion's, averaged over the anchors you own. The rarity
+   penalty uses the larger of this and your hero's overall popularity: an item that players of your build commonly buy isn't
+   unusual for you. Up to v3.3 only your hero overall counted, so for a gun McGinnis every big gun item looked rare (Glass Cannon:
+   4% as many McGinnis players as the most bought item, 49% among Hollow Point owners) and lost up to 2 points. */
+function buildPopularity(perAnchor, owned) {
+  const sum = new Map(); let k = 0;
+  for (const { anchorId, rows } of perAnchor || []) {
+    if (!owned.has(anchorId)) continue;
+    const others = (rows || []).filter(r => r.item_id !== anchorId);
+    const top = Math.max(0, ...others.map(r => r.matches || 0));
+    if (top < MIN_GAMES) continue;
+    k++;
+    for (const r of others) sum.set(r.item_id, (sum.get(r.item_id) || 0) + (r.matches || 0) / top);
+  }
+  if (!k) return null;
+  return new Map([...sum].map(([id, v]) => [id, v / k]));
+}
+/* Each item's buyers compared with the most bought item's, from a stage's statistics (for fitAnchorIds). */
+function heroShareOf(baseline) {
+  const top = Math.max(1, ...baseline.map(r => r.players || 0));
+  const m = new Map(baseline.map(r => [r.item_id, (r.players || 0) / top]));
+  return id => m.get(id) || 0;
+}
+/* Which of your items the build fit compares with (v3.4): the gun and spirit items that say most about your build first: the top
+   ones of the kind you've spent most on, and the top one of the other kind if it holds a quarter or more of those souls (a
+   hybrid); then any other items. "Says most": its price, times the share of your hero's players who DON'T buy it (shareOf: its
+   buyers compared with the most bought item's), so an item every build buys counts less. Up to v3.3 simply your three most
+   expensive items: Moppy's gun McGinnis (October 17) was compared with the players owning Capacitor, Vampiric Burst and Healing
+   Tempo, mostly spirit and hybrid builds; Hollow Point and Burst Fire (4% and 7% of McGinnis players) describe a gun build. */
+function fitAnchorIds(ownedItems, n = 3, shareOf = () => 0) {
+  if (!FIT_ANCHORS.v34) return [...ownedItems].filter(Boolean).sort((a, b) => (b.cost || 0) - (a.cost || 0)).slice(0, n).map(i => i.id);
+  const says = i => (i.cost || 0) * (1 - Math.min(1, Math.max(0, shareOf(i.id) || 0)));
+  const byCost = [...ownedItems].filter(Boolean).sort((a, b) => says(b) - says(a) || (b.cost || 0) - (a.cost || 0) || a.id - b.id);
+  const of = k => byCost.filter(i => i.item_slot_type === k);
+  const spend = k => of(k).reduce((a, i) => a + (i.cost || 0), 0);
+  const [major, minor] = spend("weapon") >= spend("spirit") ? ["weapon", "spirit"] : ["spirit", "weapon"];
+  const dmg = spend(major) + spend(minor);
+  const pick = [];
+  const add = it => { if (it && pick.length < n && !pick.includes(it)) pick.push(it); };
+  add(of(major)[0]);
+  if (dmg && spend(minor) / dmg >= 0.25) add(of(minor)[0]);
+  for (const it of [...of(major), ...of(minor)]) add(it);
+  for (const it of byCost) add(it);
+  return pick.map(i => i.id);
+}
+/* Your build from what you've spent (v3.4): developing, gun, spirit or hybrid (see BUILD_ID). Souls are the full price of each item
+   you hold (an upgrade counts its parts). main: the kind you build ("weapon" or "spirit"), off: the other one (null unless committed). */
+function buildIdentity(ownedItems) {
+  const sp = { weapon: 0, spirit: 0, vitality: 0 };
+  for (const it of ownedItems) if (it && sp[it.item_slot_type] != null) sp[it.item_slot_type] += it.cost || 0;
+  const dmg = sp.weapon + sp.spirit, share = dmg ? sp.weapon / dmg : 0.5;
+  const kind = dmg < BUILD_ID.minDamage ? "developing" : share >= BUILD_ID.committed ? "gun" : share <= 1 - BUILD_ID.committed ? "spirit" : "hybrid";
+  const main = kind === "gun" ? "weapon" : kind === "spirit" ? "spirit" : null;
+  return { kind, ...sp, damage: dmg, gunShare: share, main, off: main === "weapon" ? "spirit" : main === "spirit" ? "weapon" : null };
+}
+/* Your hero's usual share of souls in each kind by each stage (v3.4), from its purchase statistics (fl, per stage column): every
+   purchase counted at its price, adding up the stages so far (what players hold by then). [{ weapon, spirit, vitality }] per column. */
+const KIND_NORMS = new WeakMap();
+function kindNorms(fl, itemById) {
+  if (!fl?.items) return null;
+  if (KIND_NORMS.has(fl)) return KIND_NORMS.get(fl);
+  const cols = FLOW_COLS.map(() => ({ weapon: 0, spirit: 0, vitality: 0 }));
+  for (const [id, e] of fl.items) {
+    const it = itemById[id]; if (!it || cols[0][it.item_slot_type] == null) continue;
+    e.cols.forEach((x, c) => { if (x) cols[c][it.item_slot_type] += x.n * (it.cost || 0); });
+  }
+  const out = []; const run = { weapon: 0, spirit: 0, vitality: 0 };
+  for (const c of cols) { for (const k of KINDS) run[k] += c[k]; const tot = run.weapon + run.spirit + run.vitality; out.push(tot ? Object.fromEntries(KINDS.map(k => [k, run[k] / tot])) : null); }
+  KIND_NORMS.set(fl, out);
+  return out;
+}
+/* How many survival items you already have (v3.4, see VIT_SAT): what a survival item loses (above zero) or gains (below zero) for
+   your share of souls in survival items before buying it, compared with your hero's usual share at that stage.
+   spend: { weapon, spirit, vitality } souls in items you hold (planned: other planned items, which count only for "first items");
+   u: { usual, col } (the usual share and the stage column), or null without the statistics. */
+function survivalPenalty(spend, u) {
+  if (!u || !(u.usual > 0)) return 0;
+  const c = Math.min(3, Math.max(0, u.col || 0)), clamp = x => Math.min(1, Math.max(0, x));
+  const tot = (spend.weapon || 0) + (spend.spirit || 0) + (spend.vitality || 0);
+  if (tot + (spend.planned || 0) < VIT_SAT.minSpend) return VIT_SAT.first[c];
+  if (tot < VIT_SAT.minSpend) return 0;
+  const ratio = (spend.vitality || 0) / tot / u.usual;
+  if (ratio < VIT_SAT.high[0]) return -VIT_SAT.bonus[c] * clamp((VIT_SAT.low[1] - ratio) / (VIT_SAT.low[1] - VIT_SAT.low[0]));
+  return VIT_SAT.pen[c] * clamp((ratio - VIT_SAT.high[0]) / (VIT_SAT.high[1] - VIT_SAT.high[0]));
+}
+
 /* Build fit from item pairs (v2.8.2): /v1/analytics/item-permutation-stats with comb_size=2 counts, for every two
    items, the players who bought both ([a, b] and [b, a] by purchase order; both are added up here). For an item you own
    (A), each other item's win rate among players who also bought A is compared with how it does overall (whole-match
@@ -1399,7 +1587,7 @@ function enemyShifts(base, perEnemy) {
     return { enemyId, idx, shift: weightedMedian(diffs) };
   });
 }
-function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, threat = new Map(), covered = new Map(), laneRows = null, all = null }) {
+function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, cat = {}, committed = false, threat = new Map(), covered = new Map(), laneRows = null, all = null }) {
   const base = new Map(baseline.map(r => [r.item_id, r]));
   const enemies = enemyShifts(base, perEnemy);
   /* All-ranks counters (v2.9.1, with RANK_PRIOR.ctrCorr): the same comparison over every rank, blended with your rank's
@@ -1461,7 +1649,9 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
       if (f.src !== "pair" && f.z > fitZ) fitZ = f.z;
     }
     const cost = effectiveCost(it, owned, itemByClass);
-    out.push({ item: it, base: b, pb, vs, score, bestZ: best, counterZ, fits, fitScore, fitZ, cost, affordable: cost <= souls, pop: b.players });
+    // Build fit by kind (v3.4): how this item's whole kind does for players who own your items.
+    const cf = catFitFor(cat, it.item_slot_type, owned);
+    out.push({ item: it, base: b, pb, vs, score, bestZ: best, counterZ, fits, fitScore, fitZ, catFit: cf ? cf.score * (committed && phase === "late" ? CAT_PHASE_W.committed : (CAT_PHASE_W[phase] ?? 1)) : 0, catZ: cf ? cf.z : 0, catInfo: cf, cost, affordable: cost <= souls, pop: b.players });
   }
   return out;
 }
@@ -1497,13 +1687,14 @@ function mergeScored(lists) {
   const m = new Map();
   for (const { scored, w } of lists) {
     for (const s of scored) {
-      const e = m.get(s.item.id) || { score: 0, fitScore: 0, bestZ: 0, counterZ: 0, fitZ: 0, pop: 0, best: null, bestW: -1 };
+      const e = m.get(s.item.id) || { score: 0, fitScore: 0, bestZ: 0, counterZ: 0, fitZ: 0, catFit: 0, catZ: 0, pop: 0, best: null, bestW: -1 };
       e.score += w * s.score; e.fitScore += w * s.fitScore; e.bestZ += w * s.bestZ; e.counterZ += w * (s.counterZ || 0); e.fitZ += w * s.fitZ; e.pop += w * s.base.players;
+      e.catFit += w * (s.catFit || 0); e.catZ += w * (s.catZ || 0);
       if (w > e.bestW) { e.best = s; e.bestW = w; }
       m.set(s.item.id, e);
     }
   }
-  return [...m.values()].map(e => ({ ...e.best, score: e.score, fitScore: e.fitScore, bestZ: e.bestZ, counterZ: e.counterZ, fitZ: e.fitZ, pop: e.pop }));
+  return [...m.values()].map(e => ({ ...e.best, score: e.score, fitScore: e.fitScore, bestZ: e.bestZ, counterZ: e.counterZ, fitZ: e.fitZ, catFit: e.catFit, catZ: e.catZ, pop: e.pop }));
 }
 
 /* ---------- Item value at this stage, without the "richer players win more" bias ----------
@@ -1642,7 +1833,7 @@ const pts = x => (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(1);
 /* One value for every item, in win-rate points: its stage value (net-worth adjusted), how it does
    against this enemy team, how it fits your items, and what the live match needs. */
 function itemValue(s) {
-  let adj = s.adj || 0, ctr = s.score || 0, fit = FIT_W * (s.fitScore || 0);   // signed and shrunk by their uncertainty (adj is weighted where it's set)
+  let adj = s.adj || 0, ctr = s.score || 0, fit = FIT_W * (s.fitScore || 0) + CAT_FIT_W * (s.catFit || 0);   // signed and shrunk by their uncertainty (adj is weighted where it's set)
   // A healing amplifier with nothing to amplify (see ampSupport): its buyers' good results don't apply to you.
   if (s.amp?.none) { if (adj > 0) adj = 0; if (ctr > 0) ctr = 0; if (fit > 0) fit = 0; }
   // Does the same job as an item you own (see overlapOf): only part of its favourable numbers apply to you.
@@ -1654,13 +1845,23 @@ function itemValue(s) {
     if (ctr > 0 && !((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z)) ctr = 0;
     if (fit > 0 && !((s.fitZ || 0) >= STRONG_Z)) fit = 0;
   }
-  return adj + ctr + fit + (s.mechScore || 0) + (s.popPrior ?? POP_PRIOR) * (s.popShare || 0) - (s.rarePenalty || 0);
+  return adj + ctr + fit + (s.mechScore || 0) + (s.popPrior ?? POP_PRIOR) * (s.popShare || 0) - (s.rarePenalty || 0) - (s.satPen || 0);
+}
+/* A reason in this match for a big item outside a committed build (v3.4, see BUILD_ID): a convincing counter, a convincing fit with
+   your items (one item, or its whole kind), or what the live match needs. Returns its name, or null. */
+function offBuildReason(s) {
+  if (((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z) && (s.score || 0) > 0) return "counter";
+  if ((s.mechScore || 0) > 0.005) return "needs";
+  if ((s.fitZ || 0) >= STRONG_Z && (s.fitScore || 0) > 0) return "fit";
+  if ((s.catZ || 0) >= WEAK_Z && (s.catFit || 0) > 0.002) return "kind";
+  return null;
 }
 /* Out of its stage with nothing that makes it worth it in this match: no strong counter or build-fit evidence and
    nothing the live match needs. Such items aren't planned on their own (only as the first step toward an upgrade
    the plan wants), because a cheap item bought late takes a slot and souls from what you'll really need. */
 function lacksReason(s) {
   if (s.amp?.none) return true;   // nothing to amplify: never planned on its own (v2.8.3)
+  if (s.offBuild && !s.offBuild.reason) return true;   // a big item outside your committed build, with no reason in this match (v3.4)
   if (!s.timing?.outOfStage) return false;
   const strongCtr = ((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z) && (s.score || 0) > 0;
   const strongFit = (s.fitZ || 0) >= STRONG_Z && (s.fitScore || 0) > 0;
@@ -1725,7 +1926,8 @@ function groupRecs(scored) {
   weak.forEach(s => used.add(s.item.id));
   // Standard picks: best value at this stage (net-worth adjusted), popularity only breaks ties. Skips items
   // that clearly clash with what you own, and items whose time has passed.
-  const core = scored.filter(s => !used.has(s.item.id) && !(s.fits || []).some(f => f.src !== "pair" && f.z <= -STRONG_Z) && !(s.mechScore < 0) && !(s.timing?.factor < 0.4) && !s.timing?.outOfStage)
+  // v3.4: nor a big item outside your committed build without a reason (the standard picks are your build's).
+  const core = scored.filter(s => !used.has(s.item.id) && !(s.fits || []).some(f => f.src !== "pair" && f.z <= -STRONG_Z) && !(s.mechScore < 0) && !(s.timing?.factor < 0.4) && !s.timing?.outOfStage && !(s.offBuild && !s.offBuild.reason))
     .sort((a, b) => (val(b) - val(a)) || (b.pop - a.pop)).slice(0, 8);
   return { counters: strong.slice(0, 10), build, situational: weak, core };
 }
@@ -1742,7 +1944,8 @@ function groupRecs(scored) {
    it gives more per soul, and saving wins when the expensive item's edge per soul is bigger. The plan is
    built greedily, checking each choice against the rest of the plan. */
 function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById = new Map(), maxSteps = 4, rate = 12, horizon = PLAN_HORIZON_S,
-  covered = new Map(), slotCap = Infinity, activeCap = Infinity, ownedRates = new Map(), ownedInfo = new Map(), itemById = {}, nwNow = null, exclude = new Set(), sec0 = null } = {}) {
+  covered = new Map(), slotCap = Infinity, activeCap = Infinity, ownedRates = new Map(), ownedInfo = new Map(), itemById = {}, nwNow = null, exclude = new Set(), sec0 = null,
+  usualVitAt = null } = {}) {
   const kindOf = new Map([...groups.core.map(s => [s.item.id, "core"]), ...groups.situational.map(s => [s.item.id, "weak"]),
     ...groups.build.map(s => [s.item.id, "build"]), ...groups.counters.map(s => [s.item.id, "counter"])]);
   const pool = new Map();
@@ -1807,6 +2010,13 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
        throwing away a purchase or a step toward an upgrade; upgrading carries both forward, so it doesn't pay for them. */
     const hold = new Map([...owned].map(id => { const r = ownedRates.get(id) ?? GENERIC_PER_SOUL * (itemById[id]?.cost || 0) * 0.5;
       return [id, { rate: r, use: Math.min(r, ownedInfo.get(id)?.base ?? r), item: itemById[id], seq: -1 }]; }));
+    /* Survival items as the sequence goes (v3.4): a planned survival item's "enough" penalty counts the survival items planned before
+       it, so the plan doesn't stack them one after another (the value it starts from has today's penalty). Gun and spirit items
+       count as you hold them now, not as planned: otherwise buying a damage item first would look better just for diluting the
+       share, though buying both at about the same time is the same thing in the game. */
+    const spend = { ...ownedSpend };
+    let planned = 0;   // souls in planned gun and spirit items: they count only for "first items" (see survivalPenalty)
+    const rates = [];
     seq.forEach((x, i) => {
       const it = x.s.item, used = partsOf(it).filter(id => hold.has(id));
       // A part bought after the upgrade it builds into does nothing for that upgrade: not a real step.
@@ -1841,14 +2051,24 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
         refund = Math.round((sh.item?.cost || 0) * SELL_REFUND);
         sells[i] = { id: sid, item: sh.item, refund, seq: sh.seq, rate: sh.rate };
         hold.delete(sid); have.delete(sid);
+        if (usualVitAt && sh.item?.item_slot_type === "vitality") spend.vitality -= sh.item.cost || 0;
       }
       const c = effectiveCost(it, have, itemByClass);
       spent += c - refund; costs.push(c);
       // +1 s per place: when several items are affordable at once, the bigger value goes first.
       T.push(Math.max(0, spent - souls) / r + T.length);
-      for (const id of used) { const h = hold.get(id); if (h) usedUp.push({ seq: h.seq, rate: h.use ?? h.rate, at: i }); hold.delete(id); have.delete(id); }
+      for (const id of used) { const h = hold.get(id); if (h) usedUp.push({ seq: h.seq, rate: h.use ?? h.rate, at: i }); hold.delete(id); have.delete(id); const pi = h?.item || itemById[id]; if (usualVitAt && pi?.item_slot_type === "vitality") spend.vitality -= pi.cost || 0; }
       for (const cls of it.component_items || []) { const p = itemByClass[cls]; if (p) have.delete(p.id); }
-      have.add(it.id); hold.set(it.id, { rate: rateAt(x, T[i]), item: it, seq: i });
+      let ri = rateAt(x, T[i]);
+      if (usualVitAt && it.item_slot_type === "vitality" && Number.isFinite(T[i])) {
+        const f = (x.s.timing?.factor ?? 1) * (x.covered ? 0.5 : 1), g = statsValue(x.s);
+        const pen = survivalPenalty({ ...spend, planned }, usualVitAt(T[i]));
+        ri = Math.max(0.25 * g * f, ri + ((x.s.satPen || 0) - pen) * f);
+      }
+      rates[i] = ri;
+      if (usualVitAt && it.item_slot_type === "vitality") spend.vitality += it.cost || 0;
+      else planned += it.cost || 0;
+      have.add(it.id); hold.set(it.id, { rate: ri, item: it, seq: i });
     });
     let v = 0;
     for (const s of sells) if (s && s.seq < 0) { const Ts = T[sells.indexOf(s)]; v -= s.rate * W(Ts, horizon); }   // an owned item sold: its value from then on is lost
@@ -1863,7 +2083,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
       let end = horizon;
       for (let j = i + 1; j < seq.length; j++) if (!blocked.has(j) && (consumes(seq[j], x) || sells[j]?.seq === i)) { end = Math.min(end, T[j]); break; }
       if (x.covered && end >= horizon) return;   // a repurchased part is only worth something as the step to its upgrade
-      v += rateAt(x, T[i]) * W(T[i], end);
+      v += (rates[i] ?? rateAt(x, T[i])) * W(T[i], end);
     });
     /* Souls the sequence doesn't spend aren't worthless: they'd go on something else. Count them at the value of
        an average item's stats from when they're earned, so a plan isn't better just because it lists more items. */
@@ -1876,6 +2096,29 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     return { v, T, costs, sells, blocked };
   };
   const density = (x, have) => rateOf(x) / Math.max(100, effectiveCost(x.s.item, have, itemByClass));
+  /* The rest of a sequence being judged, most value per soul first. With "enough" survival items (v3.4) each survival item's value
+     is the one for what you'd hold by then, so a candidate isn't judged against a rest that stacks survival items (which made
+     every survival candidate look worse than it is, or a damage item look better just for diluting them). */
+  const ownedSpend = { weapon: 0, spirit: 0, vitality: 0 };
+  if (usualVitAt) for (const id of owned) { const it = itemById[id]; if (it && ownedSpend[it.item_slot_type] != null) ownedSpend[it.item_slot_type] += it.cost || 0; }
+  const restOrder = (pool, have, before) => {
+    if (!usualVitAt) return pool.sort((a, b) => density(b, have) - density(a, have)).slice(0, maxSteps + 2);
+    const sp = { ...ownedSpend, planned: 0 };   // as in evaluate: planned survival items count, planned damage items only for "first items"
+    for (const y of before) if (y.s.item.item_slot_type === "vitality") sp.vitality += y.s.item.cost || 0; else sp.planned += y.s.item.cost || 0;
+    const usual = usualVitAt(0), out = [], left = pool.slice();
+    while (out.length < maxSteps + 2 && left.length) {
+      let bi = 0, bv = -Infinity;
+      left.forEach((y, i) => {
+        let r = rateOf(y);
+        if (y.s.item.item_slot_type === "vitality") { const fct = (y.s.timing?.factor ?? 1) * (y.covered ? 0.5 : 1), g = statsValue(y.s); r = Math.max(0.25 * g * fct, r + ((y.s.satPen || 0) - survivalPenalty(sp, usual)) * fct); }
+        const d = r / Math.max(100, effectiveCost(y.s.item, have, itemByClass));
+        if (d > bv) { bv = d; bi = i; }
+      });
+      const y = left.splice(bi, 1)[0]; out.push(y);
+      if (y.s.item.item_slot_type === "vitality") sp.vitality += y.s.item.cost || 0; else sp.planned += y.s.item.cost || 0;
+    }
+    return out;
+  };
   const steps = [];
   const chosen = [];
   let remaining = cands.slice();
@@ -1885,7 +2128,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     const scores = new Map();
     for (const x of remaining) {
       if (chosen.some(y => consumes(y, x))) continue;   // a part of something already planned
-      const rest = remaining.filter(y => y !== x && !consumes(x, y)).sort((a, b) => density(b, have) - density(a, have)).slice(0, maxSteps + 2);
+      const rest = restOrder(remaining.filter(y => y !== x && !consumes(x, y)), have, [...chosen, x]);
       let ev = evaluate([...chosen, x, ...rest]);
       // A part is bought for its upgrade: also try the upgrade straight after it (the general ordering may put
       // it later), so "buy the part now, upgrade when you can" is judged fairly against saving for the upgrade.
@@ -1932,7 +2175,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     let best = null, bestV = -Infinity;
     for (const x of remaining) {
       if (chosen.some(y => consumes(y, x)) || x.covered) continue;
-      const rest = remaining.filter(y => y !== x && !consumes(x, y)).sort((a, b) => density(b, have) - density(a, have)).slice(0, maxSteps + 2);
+      const rest = restOrder(remaining.filter(y => y !== x && !consumes(x, y)), have, [...chosen, x]);
       const ev = evaluate([...chosen, x, ...rest], true);
       if (ev.blocked.has(chosen.length)) continue;
       if (ev.v > bestV) { bestV = ev.v; best = x; }
@@ -2579,17 +2822,26 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const wsum = ready.reduce((a, p) => a + p.w, 0);
   // Items already inside something you own (Sprint Boots inside Enduring Speed...) aren't recommended again.
   const covered = coveredBy(owned, prog || { parts: new Map() });
+  // Your build (v3.4, see buildIdentity): a committed build keeps the build fit by kind after 20 minutes too (CAT_PHASE_W.committed).
+  const identity = buildIdentity([...owned].map(id => itemById[id]).filter(Boolean));
   const lists = ready.map(p => {
     const e = p.entry;
     return { w: p.w / wsum, scored: scoreItems({ baseline: e.baseline, perEnemy: e.ready ? e.perEnemy : [], items, owned, souls,
-      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, threat: threatW, covered, laneRows: p.laneRows || null, all: p.all || e.all || null }) };
+      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, cat: CAT_FIT_W ? e.catFit || {} : {}, committed: !!identity.off, threat: threatW, covered, laneRows: p.laneRows || null, all: p.all || e.all || null }) };
   });
   const merged = mergeScored(lists);
   // Stage value without the wealth bias, and timing (flow data; optional).
   const maxPop = Math.max(1, ...merged.map(s => s.pop || 0));
   // Without the adjusted values (flow data unavailable) popularity is the best remaining evidence, so it counts more.
   const popPrior = fl ? POP_PRIOR : POP_PRIOR * 4;
-  for (const s of merged) { s.popShare = (s.pop || 0) / maxPop; s.popPrior = popPrior; s.rarePenalty = rarityPenalty(s.popShare); }
+  // Popularity among players of your build too (v3.4, see buildPopularity): the larger of the two counts.
+  const bps = BUILD_POP.on ? ready.map(p => ({ w: p.w / wsum, m: buildPopularity(p.entry.fit?.perAnchor, owned) })).filter(x => x.m) : [];
+  const bw = bps.reduce((a, x) => a + x.w, 0);
+  const buildShare = id => bw ? bps.reduce((a, x) => a + x.w * (x.m.get(id) || 0), 0) / bw : 0;
+  for (const s of merged) {
+    s.popShareHero = (s.pop || 0) / maxPop; s.popShareBuild = bw ? buildShare(s.item.id) : null;
+    s.popShare = Math.max(s.popShareHero, s.popShareBuild || 0); s.popPrior = popPrior; s.rarePenalty = rarityPenalty(s.popShare);
+  }
   /* Which stage-value columns each stage reads: laning 0-9 min, mid game 9-20, late game 20-30 or 30+ minutes. The two
      late columns are blended over 90 s either side of 30:00 (v2.8.6), like the stages at 9:00 and 20:00: up to v2.8.5 the
      value switched in one second, so in a recorded Seven match Infuser fell from +2.2 to -0.5 points at 30:00 and the part
@@ -2608,6 +2860,17 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   for (const s of merged) s.amp = ampSupport(s.item, ownedItems, abilities);
   // Items that do the same job as one you own (v2.8.5).
   for (const s of merged) s.overlap = overlapOf(s.item, ownedItems, tagsOf, itemByClass);
+  /* Your build (v3.4): what kind it is, enough survival items, and big items outside a committed build. */
+
+  const norms = kindNorms(fl, itemById);
+  const usualVitAt = t => { const col = flowCol(t ?? 0), n = norms?.[col]; return n ? { usual: n.vitality, col } : null; };
+  const spendNow = { weapon: identity.weapon, spirit: identity.spirit, vitality: identity.vitality };
+  const usualNow = usualVitAt(sec);
+  for (const s of merged) {
+    s.satPen = s.item.item_slot_type === "vitality" ? survivalPenalty(spendNow, usualNow) : 0;
+    if (s.satPen) s.satInfo = { share: identity.vitality / Math.max(1, identity.weapon + identity.spirit + identity.vitality), usual: usualNow.usual,
+      first: identity.weapon + identity.spirit + identity.vitality < VIT_SAT.minSpend };
+  }
   /* Match-aware layer: with live items for the players in this match, and (v2.10) with the enemy heroes alone, from their
      abilities (kitOf: hero -> kit effects; kitAvg: game time -> what an average team's kits bring). */
   let match = null;
@@ -2629,6 +2892,8 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     for (const s of merged) { const m = mechFor(s.item, needs, P, tagsOf); s.mechScore = m.score; s.mechWhy = m.why; s.mechWarn = m.warn; s.mechInfo = m.info; s.kitParts = m.kit; }
     match = { P, needs, fed, live, enemyItemCount: [...enemyItems.values()].reduce((a, l) => a + l.length, 0) };
   }
+  // Big items outside a committed build need a reason in this match (v3.4); after the match-aware layer, which is one of the reasons.
+  for (const s of merged) s.offBuild = identity.off && s.item.item_slot_type === identity.off && (s.item.item_tier || 0) >= BUILD_ID.bigTier ? { kind: identity.kind, reason: offBuildReason(s) } : null;
   const scoredById = new Map(merged.map(s => [s.item.id, s]));
   // Items you've said you don't want are left out of every list and the plan for this match (still shown in details).
   for (const s of merged) s.skipped = skipped.has(s.item.id);
@@ -2710,13 +2975,14 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const prevPlan = prevOrder.filter(p => !owned.has(p.id) && !skipped.has(p.id));
   const order = buildOrder(groups, souls, owned, itemByClass, { prev: prevPlan, scoredById, rate: incomeRate(curve, sec), horizon: planHorizon(sec, fl?.matchLen),
     covered, slotCap, activeCap: MAX_ACTIVE, ownedRates, ownedInfo, itemById, exclude: skipped, sec0: STAGE_AT_PURCHASE.on ? sec : null,
+    usualVitAt: norms ? T => usualVitAt((sec ?? 0) + (Number.isFinite(T) ? T : 0)) : null,
     nwNow: Math.max(souls + spentOn(owned, itemById), netWorthAt(curve, sec) || 0) });
   // What each recommended item is worth a second if bought now, and which upgrade a planned part is for: the page keeps this
   // for the moment you buy one (purchase memory, v2.8.6).
   const purchaseValues = new Map();
   for (const s of merged) purchaseValues.set(s.item.id, { rate: purchaseRate(s) });
   for (const st of order) { const e = purchaseValues.get(st.s.item.id) || { rate: purchaseRate(st.s) }; if (st.into) { e.forUp = st.into; const su = scoredById.get(st.into); if (su) e.rate = Math.max(e.rate, purchaseRate(su) * (st.s.item.cost || 0) / Math.max(1, su.item.cost || 0)); } purchaseValues.set(st.s.item.id, e); }
-  return { order, groups, scoredById, merged, match, ownedRates, ownedInfo, purchaseValues };
+  return { order, groups, scoredById, merged, match, ownedRates, ownedInfo, purchaseValues, identity };
 }
 
 /* ---------- Replaying a finished match (v2.9) ----------
@@ -2778,16 +3044,18 @@ function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abili
     const souls = Math.max(0, Math.round(((nw ?? 0) - spent) / 10) * 10);
     const roster = new Map(match.players.map(x => [x.hero, { team: x.team, items: [...heldAt(x, t, G.itemById, G.itemByClass).keys()], nw: nwAt(x, t) ?? 0 }]));
     const byCost = [...owned].map(id => G.itemById[id]).filter(Boolean).sort((a, b) => b.cost - a.cost);
-    const anchors = byCost.slice(0, 3).map(i => i.id), others = byCost.slice(3).map(i => i.id);
+    const shareBase = st.stages[phaseForSeconds(t)]?.baseline || [];
+    const anchors = fitAnchorIds(byCost, 3, heroShareOf(shareBase)), others = byCost.map(i => i.id).filter(id => !anchors.includes(id));
     // Item pairs for the items beyond your three most expensive, as the page does once PAIR_FIT is on (st.pairs: { whole, pairs }).
     const pf = PAIR_FIT.on && st.pairs && others.length ? pairFit(st.pairs.whole, st.pairs.pairs, others) : null;
     const ready = phasePlan(t, phaseForSeconds(t)).map(pp => {
       const s = st.stages[pp.phase] || { baseline: [], perEnemy: {}, fit: {} };
       const perAnchor = anchors.filter(a => s.fit?.[a]).map(a => ({ anchorId: a, rows: s.fit[a] }));
       const stageFit = perAnchor.length ? buildFit(s.baseline, perAnchor) : {};
+      const stageCat = perAnchor.length ? catFit(s.baseline, perAnchor, G.itemById) : {};
       const a = st.all?.stages?.[pp.phase];
       return { ...pp, entry: { ready: true, baseline: s.baseline, perEnemy: enemies.filter(e => s.perEnemy?.[e]).map(e => ({ enemyId: e, rows: s.perEnemy[e] })),
-        fitMap: pf ? mergeFits(stageFit, pf, anchors) : stageFit,
+        fitMap: pf ? mergeFits(stageFit, pf, anchors) : stageFit, catFit: stageCat, fit: { perAnchor },
         all: a ? { baseline: a.baseline, perEnemy: enemies.filter(e => a.perEnemy?.[e]).map(e => ({ enemyId: e, rows: a.perEnemy[e] })) } : null },
         laneRows: pp.phase === "lane" ? new Map([...laneIds].filter(e => st.laneVs?.[e]).map(e => [e, st.laneVs[e]])) : null };
     });
@@ -3031,7 +3299,21 @@ function slotInfo() {
 
 function renderItems() {
   if (!$("pickerOverlay").hidden) renderPickerList();
-  renderOwned(); renderSold(); renderSlots();
+  renderOwned(); renderSold(); renderSlots(); renderBuildKind();
+}
+/* Your build in one line (v3.4, see buildIdentity), under your items. */
+const KIND_WORD = { weapon: "gun", spirit: "spirit", vitality: "survival" };
+function buildKindText(id) {
+  const n = x => x.toLocaleString();
+  const parts = `${id.weapon ? n(id.weapon) : "none"} in gun items, ${id.spirit ? n(id.spirit) : "none"} in spirit`;
+  if (id.kind === "developing") return id.damage ? `Build: still developing (${parts}). The tool reads your direction once about ${n(BUILD_ID.minDamage)} souls are in gun and spirit items.` : "";
+  if (id.kind === "hybrid") return `Build: hybrid (${parts}).`;
+  return `Build: ${id.kind} (${parts}). Big ${KIND_WORD[id.off]} items are suggested only when something in this match calls for them.`;
+}
+function renderBuildKind() {
+  const box = $("buildKind"); if (!box) return;
+  const t = buildKindText(buildIdentity([...S.owned].map(id => S.itemById[id]).filter(Boolean)));
+  box.textContent = t; box.hidden = !t;
 }
 /* "7 of 9 slots used", with the extra slots from the match, or a control to set them by hand. */
 function renderSlots() {
@@ -3566,9 +3848,14 @@ function ensureFlow() {
 /* Build fit data, per stage, for your three most expensive items; from v2.8.2 also item pairs for the rest (pairFit). */
 let fitTimer = null;
 function scheduleFit() { clearTimeout(fitTimer); fitTimer = setTimeout(refreshFit, 500); }
+/* The items the build fit compares with now (v3.4: fitAnchorIds). */
+function fitAnchorsNow() {
+  const e = currentPlan().map(p => S.cache[dataKey(p.phase)]).find(x => x?.ready);
+  return fitAnchorIds([...S.owned].map(id => S.itemById[id]).filter(Boolean), 3, heroShareOf(e?.baseline || []));
+}
 async function refreshFit() {
   const owned = [...S.owned].map(id => S.itemById[id]).filter(Boolean).sort((a, b) => b.cost - a.cost);
-  const anchors = owned.slice(0, 3).map(i => i.id), others = owned.slice(3).map(i => i.id);
+  const anchors = fitAnchorsNow(), others = owned.map(i => i.id).filter(id => !anchors.includes(id));
   const akey = anchors.join(",");
   const P = others.length && PAIR_FIT.on ? pairsNow() : null;
   const psig = others.join(",") + (P ? "|" + P.key : "");
@@ -3576,7 +3863,7 @@ async function refreshFit() {
     const entry = S.cache[dataKey(phase)];
     if (!entry || !entry.ready) continue;
     if (entry.fit?.akey !== akey && entry.fitPending !== akey) {
-      if (!anchors.length) { entry.fit = { akey, perAnchor: [] }; entry.stageFit = {}; }
+      if (!anchors.length) { entry.fit = { akey, perAnchor: [] }; entry.stageFit = {}; entry.catFit = {}; }
       else {
         entry.fitPending = akey;
         const rows = await Promise.all(anchors.map(a => getJSON(`/v1/analytics/item-stats?${entry.q}&include_item_ids=${a}`).catch(() => [])));
@@ -3584,9 +3871,11 @@ async function refreshFit() {
         entry.fitPending = null;
         entry.fit = { akey, perAnchor: anchors.map((a, i) => ({ anchorId: a, rows: rows[i] })) };
         entry.stageFit = buildFit(entry.baseline, entry.fit.perAnchor);   // computed once, not on every render
+        entry.catFit = catFit(entry.baseline, entry.fit.perAnchor, S.itemById);   // by kind (v3.4)
       }
       entry.pairSig = null;
     }
+    if (entry.fit?.akey === akey && !entry.catFit && entry.fit.perAnchor) { entry.catFit = catFit(entry.baseline, entry.fit.perAnchor, S.itemById); entry.pairSig = null; }
     if (entry.fit?.akey !== akey || entry.pairSig === psig) continue;
     entry.pairSig = psig;
     entry.fitMap = mergeFits(entry.stageFit, P ? pairFit(P.whole, P.pairs, others) : {}, anchors);
@@ -3806,13 +4095,21 @@ const LIVE_FRESH_MS = 45000;
 const STEAM64_BASE = 76561197960265728n;
 const LIVE_REQ_PER_MIN = 12;          // stay well under the API's 20 per minute
 const RETRY_DELAYS = [10, 20, 40, 60, 60, 60];   // seconds; then give up
+/* A live connection that stayed up this long with the broadcast being read (not just the relay warming up) worked, so its drop
+   starts the count of tries afresh, and the reconnect after it waits only a moment (v3.4). Up to v3.3 only rows reset
+   the count, so the game-over listener, which gets no rows until the match ends, used up its 6 tries on the broadcast's routine
+   drops and gave up about 12 minutes into Moppy's McGinnis match (October 17): the match end was never confirmed. Reconnects
+   waited 10 s, so every routine drop (14 in that match, about every 2 minutes) left the data about 30 s behind. */
+const LIVE_HEALTHY = { ms: 45000, quickS: 2 };   // ms: healthy after; quickS: the reconnect wait then (tests shorten them)
 const LIVE_QUIET = { ms: 90000 };   // a live stream with no bytes at all for this long (the service sends a keep-alive every 15 s) is reconnected
 
 /* The latest message: what's happening now, or what to do next. Shown under the status steps. */
 function liveStatus(msg, cls) {
   const p = $("liveStatus"); p.textContent = msg; p.className = "small next-line " + (cls || "muted");
   LIVE.msg = { text: msg, cls: cls || "muted" };
-  try { if (LOG.cur && msg !== LOG.lastLive) { LOG.lastLive = msg; logEvent("live", { text: msg.slice(0, 200), cls: cls || "muted" }); } } catch {}
+  // A message that only differs by its counter ("0:31 so far", "0:33 so far"...) is one entry in the match record, not one a second.
+  const gist = String(msg).replace(/\d+:\d\d so far/, "");
+  try { if (LOG.cur && gist !== LOG.lastLive) { LOG.lastLive = gist; logEvent("live", { text: msg.slice(0, 200), cls: cls || "muted" }); } } catch {}
   LIVE.log.push(new Date().toLocaleTimeString("en-CA") + " " + msg); if (LIVE.log.length > 40) LIVE.log.shift();
   renderLive();
 }
@@ -3894,8 +4191,9 @@ function renderLive() {
   $("unlinkMatch").hidden = !L.id; $("liveReport").hidden = !L.id;
   $("findMatch").disabled = !!(L.searching || L.steamBusy || L.connecting);
   $("linkMatch").disabled = !!L.connecting;
-  const used = spectatesUsed();
-  $("quotaNote").textContent = used ? `Match connections used in the last hour: ${used} of ${SPECTATE_PER_HOUR} (counted on this computer).` : "";
+  const used = spectatesUsed(), hold = spectateHold();
+  $("quotaNote").textContent = (used ? `Match connections used in the last hour: ${used} of ${SPECTATE_PER_HOUR} (counted on this computer).` : "")
+    + (hold ? `${used ? " " : ""}The data service said the next new connection frees up at about ${new Date(hold.until).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}; matches it's already watching still connect.` : "");
 }
 /* Technical details: the latest diagnostic text, plus any unexpected errors, plus recent status lines. */
 let diagBase = "";
@@ -3986,8 +4284,8 @@ function schemaSummary(tables, cols) {
 const OFTEN_TICKS = 4;
 const THIN_TICKS = 16;
 const waitText = since => { const s = Math.round((Date.now() - since) / 1000);
-  return s < 30 ? "Waiting for the broadcast to start. This can take up to a minute."
-    : `Waiting for Valve's broadcast of your match (${mmss(s)} so far). It usually starts sending within 1 to 3 minutes of the match beginning; the tool connects by itself.`; };
+  return s < 30 ? "Waiting for the broadcast to start. Valve's broadcast runs about a minute behind the game, so at the start of a match this takes about a minute."
+    : `Waiting for Valve's broadcast of your match (${mmss(s)} so far). It runs about a minute behind the game, so the first data usually arrives 1 to 3 minutes after the match begins; the tool connects by itself.`; };
 function startRosterStream() {
   const light = !LIVE.thinRejected && !!LIVE.cols?.tick;
   LIVE.thin = light; tlMark("stream started");
@@ -4295,6 +4593,28 @@ const SERVICE_BLOCK_MS = 20 * 60000;
 const SERVICE_WIDE = new Set(["k_eInvalidClientVersion", "k_eDisabled"]);
 function serviceBlock() { const b = store.get("svcBlock"); return b && Date.now() - b.at < SERVICE_BLOCK_MS ? b : null; }
 function noteLinkTry(id, ok) { (S.linkTried ||= {})[String(id)] = { at: Date.now(), ok }; }
+/* After the data service refused a new connection for its limit (429), the time it said the next one frees up (v3.4): until
+   then Connect doesn't ask again, because a refused try counts too and pushes the hour later. Its answer also says which limit
+   it was (read October 17 in its code: rate_limiter): "IP" is the 6 an hour per internet connection, counted for every copy
+   of the tool and every device on the connection; "Global" is a limit shared by all the service's users. Up to v3.3 the tool
+   always blamed the 6 an hour, though Moppy's own count showed 4. { until, type, limit, period, requests }. */
+function spectateHold() { const h = store.get("spectateHold"); return h && Date.now() < h.until ? h : null; }
+/* The matches the data service is already watching (GET /v1/matches/live/urls, free: no connection used, its limit is 100
+   requests a second). A match on it connects with no connection used, even when this hour's are used up (v3.4). The answer
+   holds only match numbers and broadcast addresses. Returns the broadcast address or null (not listed, or the list failed). */
+async function listedBroadcast(id) {
+  const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+  const t = ctrl ? setTimeout(() => ctrl.abort(), LISTED_TIMEOUT_MS) : null;
+  try {
+    const res = await fetch(`${API}/v1/matches/live/urls`, ctrl ? { signal: ctrl.signal } : undefined);
+    if (!res.ok) return null;
+    const list = await res.json();
+    const hit = Array.isArray(list) ? list.find(x => x && String(x.match_id) === String(id) && typeof x.broadcast_url === "string" && x.broadcast_url) : null;
+    return hit ? hit.broadcast_url : null;
+  } catch { return null; }
+  finally { if (t) clearTimeout(t); }
+}
+const LISTED_TIMEOUT_MS = 6000;
 
 /* A different match than the one saved: start its state fresh (items, sold list, holds, clock), but
    keep your hero, Steam account and settings. */
@@ -4375,8 +4695,24 @@ async function linkSteps(id, opts) {
     if (!LIVE.cols) throw new Error("The live data format couldn't be read, so live updates are off. Your teams came from the Watch list.");
     liveStatus("Connecting to the match broadcast…");
     const saved = store.get("live-" + id);
-    if (saved && Date.now() - saved.at < 3 * 3600000) LIVE.url = saved.url;
+    let listed = null;
+    if (saved && Date.now() - saved.at < 3 * 3600000) { LIVE.url = saved.url; LIVE.urlVia = "saved"; }
+    else if ((listed = await listedBroadcast(id))) {
+      if (stale()) return;
+      LIVE.url = listed; LIVE.urlVia = "listed"; tlMark("listed (free)");
+      store.set("live-" + id, { at: Date.now(), url: LIVE.url });
+    }
     else {
+      if (stale()) return;
+      const hold = spectateHold();
+      if (hold) {
+        const at = new Date(hold.until).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
+        tlMark("held: limit");
+        throw Object.assign(new Error((hold.type === "Global" ? "The data service is at its limit for all users right now, and your match isn't one it's already watching."
+          : "This hour's match connections are used up, and your match isn't one the data service is already watching.")
+          + ` The next connection frees up at about ${at}. The tool won't ask before then, because a refused try counts too and would push that later. Meanwhile, fill in your teams by hand (Setup) if you like.`),
+          { short: hold.type === "Global" ? "The data service is at its limit for all users" : "This hour's match connections are used up", temporary: true, held: true });
+      }
       const block = serviceBlock();
       if (block) {
         const armed = LIVE.tryAnyway && LIVE.tryAnyway.id === id && Date.now() - LIVE.tryAnyway.at < 60000;
@@ -4404,6 +4740,7 @@ async function linkSteps(id, opts) {
         if (stale()) return;
         const fail = spectateFailure(res.status, body);
         if (SERVICE_WIDE.has(fail.reason)) store.set("svcBlock", { at: Date.now(), reason: fail.reason, short: fail.short, text: fail.text });
+        if (res.status === 429) store.set("spectateHold", { until: Date.now() + 1000 * (fail.wait || 300), type: fail.type === "Global" || fail.reason === "limit-global" ? "Global" : "IP" });
         const left = Math.max(0, SPECTATE_PER_HOUR - spectatesUsed());
         // A temporary refusal is tried once more by itself after a pause (at most LINK_RETRY.max times per match, and
         // never with the last connection of the hour). Pressing Connect still tries straight away.
@@ -4413,14 +4750,16 @@ async function linkSteps(id, opts) {
         const next = auto ? ` The tool will try again by itself at about ${at} (that uses one of your ${left} connections left this hour), or press Connect to try now.`
           : fail.retry ? ` Wait a minute or two, then press Connect. (Each try uses a connection: ${left} of ${SPECTATE_PER_HOUR} left this hour.)`
           : fail.reason === "limit" ? "" : ` (${left} of ${SPECTATE_PER_HOUR} match connections left this hour.)`;
-        LIVE.spectateFails = [...(LIVE.spectateFails || []), { at: Date.now(), status: res.status, reason: fail.reason, auto }].slice(-6);
+        LIVE.spectateFails = [...(LIVE.spectateFails || []), { at: Date.now(), status: res.status, reason: fail.reason, auto,
+          ...(res.status === 429 ? { type: fail.type, limit: fail.limit, period: fail.period, requests: fail.requests, wait: fail.wait } : {}) }].slice(-6);
         tlMark("refused: " + fail.reason);
         throw Object.assign(new Error(fail.text + next), { short: fail.short, temporary: fail.retry, auto });
       }
       const url = (await res.json()).broadcast_url;
       if (stale()) return;
       store.set("svcBlock", null);   // the data service is watching matches again
-      LIVE.url = url;
+      store.set("spectateHold", null);
+      LIVE.url = url; LIVE.urlVia = "spectate";
       if (!LIVE.url) throw new Error("The data service didn't return a broadcast for this match. Try again in a minute.");
       store.set("live-" + id, { at: Date.now(), url: LIVE.url });
     }
@@ -4447,8 +4786,8 @@ function unlinkMatch(quiet) {
   for (const k in LIVE.streams) LIVE.streams[k].stop();
   Object.assign(LIVE, { streams: {}, deathReplay: null, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
     itemsOk: false, itemsChecked: false, idSeen: 0, idKnown: 0, idSamples: [], knownSet: null, rawItemSample: "", rawSoulsSample: "", soulsRows: 0, invSig: "", souls: null, nw: null, meHow: null,
-    laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
-    connecting: false, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, ownLivePrev: null, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
+    thinRejected: null, laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
+    connecting: false, urlVia: null, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, ownLivePrev: null, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
   clearTimeout(LIVE.soulsCheck);
   S.matchId = null;
   renderSources();
@@ -4688,9 +5027,14 @@ function liveBudgetWait() {
    (relay not ready, network, rate limit) retry with growing waits, then give up. */
 function liveStream(name, sql, onRow, onReject) {
   let ctrl = null, stopped = false, tries = 0, timer = null, gotRows = false, endCheck = null, dog = null, lastByteAt = 0;
+  // This connection: when it opened, when the relay last said it wasn't ready, rows on it, and when data last flowed before a drop.
+  let connAt = 0, statusAt = 0, connRows = 0, dropAt = 0;
   const roster = name === "roster";
-  // What happened to each stream, for match records (no personal data): rows received, last status, last problem.
-  const info = (LIVE.streamInfo ||= {})[name] = { rows: 0, started: Date.now(), status: null, problem: null, retries: 0 };
+  /* What happened to each stream, for match records (no personal data): rows received, last status, last problem; and (v3.4)
+     drops (the broadcast stopped after data had flowed), gaps (seconds without data across each drop and reconnect, the last
+     20), relay errors, and the most attempts the relay needed before it answered. */
+  const info = (LIVE.streamInfo ||= {})[name] = { rows: 0, started: Date.now(), status: null, problem: null, retries: 0, drops: 0, gaps: [], relayErrors: 0, relayAttempts: 0 };
+  const healthy = () => connAt && Date.now() - connAt >= LIVE_HEALTHY.ms && (connRows > 0 || Date.now() - statusAt >= Math.min(30000, LIVE_HEALTHY.ms));
   const say = (m, cls, state) => { if (!roster) return; if (state) LIVE.rosterState = { state, text: m }; liveStatus(m, cls); };
   const fatal = (m, detail) => { stopped = true; info.problem = "rejected: " + String(detail).slice(0, 200);
     if (onReject) { onReject(detail); return; }   // the caller has another way (a simpler request)
@@ -4699,6 +5043,8 @@ function liveStream(name, sql, onRow, onReject) {
   const retry = (m, waitS) => {
     if (stopped) return;
     clearTimeout(timer); clearInterval(dog);
+    if (healthy()) tries = 0;   // this connection worked a while: its drop is a fresh start, not one more failure (v3.4)
+    connAt = 0;
     if (tries >= RETRY_DELAYS.length) { say("Lost the live connection after several tries. Press Connect to try again (reconnecting to the same match is free).", "error", "error"); stopped = true; return; }
     const s = waitS ?? RETRY_DELAYS[tries]; tries++; info.retries++; info.problem = m;
     say(`${m} Trying again in ${s} s (${tries} of ${RETRY_DELAYS.length}).`, "warn", "warn");
@@ -4718,6 +5064,7 @@ function liveStream(name, sql, onRow, onReject) {
     let res;
     try { res = await fetch(`${API}/v1/matches/demo/live/query?${q}`, { signal: ctrl.signal, headers: { Accept: "text/event-stream" } }); }
     catch (e) { if (!stopped && e.name !== "AbortError") retry("Couldn't reach the data service."); return; }
+    if (res.ok) { connAt = Date.now(); statusAt = 0; connRows = 0; }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       if (res.status === 400) return fatal("The live data service didn't accept the tool's request. Open \"Technical details\" below if you want to report it.", body.slice(0, 400));
@@ -4744,7 +5091,8 @@ function liveStream(name, sql, onRow, onReject) {
           const d = data.join("\n");
           if (ev === "message" && d) {
             if (!gotRows) { gotRows = true; tries = 0; if (roster) tlMark("first rows"); }   // only real rows prove the stream works
-            info.rows++;
+            info.rows++; connRows++;
+            if (dropAt) { info.gaps = [...info.gaps, Math.round((Date.now() - dropAt) / 1000)].slice(-20); dropAt = 0; }
             if (roster && LIVE.rosterState?.state !== "ok") {
               const was = LIVE.rosterState?.state; tries = 0; LIVE.rosterState = { state: "ok" };
               if (was === "warn") liveStatus("Reconnected. Live data is flowing again.", "ok");
@@ -4752,15 +5100,34 @@ function liveStream(name, sql, onRow, onReject) {
             try { onRow(JSON.parse(d)); } catch {}
           } else if (ev === "status") {
             let m = d; try { m = JSON.parse(d).message || d; } catch {}
+            statusAt = Date.now();
+            const att = Number((/attempt (\d+)/.exec(String(m)) || [])[1]); if (att > info.relayAttempts) info.relayAttempts = att;
             if (!gotRows) say(waitText(info.started), "muted");
             if (roster) tlMark("first status");
             LIVE.log.push("status: " + String(m).slice(0, 120)); info.status = String(m).slice(0, 120);
           } else if (ev === "error") {
             let st = 0, msg = d; try { const j = JSON.parse(d); st = j.status || 0; msg = j.error || d; } catch {}
             ctrl.abort();
-            if (st === 400 || /invalid query|planning|not found|parse error/i.test(msg))
+            /* A relay problem (the service's 502, "Live broadcast error: ...") is never the tool's request being refused (v3.4). Up to
+               v3.3 Valve's "404 Not Found" after a match ended matched "not found" below, so the end of Moppy's McGinnis match showed
+               "didn't accept the tool's request", and the lighter player query was switched off for the rest of the session. */
+            const relay = st === 502 || /live broadcast error/i.test(msg);
+            if (!relay && (st === 400 || /invalid query|planning|not found|parse error/i.test(msg)))
               return fatal("The live data service didn't accept the tool's request. Open \"Technical details\" below if you want to report it.", msg.slice(0, 400));
-            return retry(st === 502 ? "The match broadcast isn't available yet." : "The live stream reported a problem.");
+            if (relay) {
+              info.relayErrors++;
+              /* The broadcast worked earlier in this match and now can't be read at all: after a drop, that's how a match end
+                 usually looks (the relay stops serving it). It counts like the broadcast stopping with nothing newer (end below). */
+              if (roster && gotRows) {
+                const t = LIVE.lastTick || 0;
+                endCheck = endCheck && t <= endCheck.tick + TICK_RATE * 5 ? { ...endCheck, n: endCheck.n + 1 } : { tick: t, n: 1 };
+                LIVE.endChecks = (LIVE.endChecks || 0) + 1;
+                if (LIVE.gameOver || endCheck.n >= 2) { stopped = true; matchEnded(LIVE.gameOver ? "confirmed" : "probable"); return; }
+                return retry("Valve's broadcast isn't answering. If the match just ended, the tool will notice in a moment; otherwise it reconnects by itself (no connection used up).", LIVE_HEALTHY.quickS);
+              }
+              return retry(gotRows ? "Valve's broadcast isn't answering." : "The match broadcast isn't available yet.");
+            }
+            return retry("The live stream reported a problem.");
           } else if (ev === "end") {
             /* "end" means the data service's stream finished, not that the match did: its code ends the stream when the
                broadcast stops, which also happens when fetching the next piece of the broadcast fails or a piece can't be
@@ -4770,14 +5137,17 @@ function liveStream(name, sql, onRow, onReject) {
                  stops without any newer data does it conclude the match has probably ended, and says so;
                - the other streams reconnect too instead of stopping for good (souls stopped updating before). */
             ctrl.abort();
-            if (!gotRows) return retry("The broadcast stopped before sending any data.");
+            const ok = healthy();
+            if (ok && connRows) { info.drops++; dropAt = Date.now(); }
+            // A listener that waits for something rare (the game-over message) gets no rows: a drop after a healthy connection is normal.
+            if (!gotRows) return retry("The broadcast stopped before sending any data.", ok ? LIVE_HEALTHY.quickS : undefined);
             if (LIVE.rosterState?.state === "ended" || (LIVE.gameOver && roster)) { stopped = true; if (roster) matchEnded("confirmed"); return; }
-            if (!roster) return retry("The live stream stopped.", 10);
+            if (!roster) return retry("The live stream stopped.", ok ? LIVE_HEALTHY.quickS : 10);
             const t = LIVE.lastTick || 0;
             endCheck = endCheck && t <= endCheck.tick + TICK_RATE * 5 ? { ...endCheck, n: endCheck.n + 1 } : { tick: t, n: 1 };
             LIVE.endChecks = (LIVE.endChecks || 0) + 1;
             if (endCheck.n >= 2) { stopped = true; matchEnded("probable"); return; }
-            return retry("The live broadcast stopped sending data. That's usually a short hiccup on the broadcast's side, so the tool is reconnecting (no connection used up).", 10);
+            return retry("The live broadcast stopped sending data. That's usually a short hiccup on the broadcast's side, so the tool is reconnecting (no connection used up).", ok ? LIVE_HEALTHY.quickS : 10);
           }
         }
       }
@@ -5125,7 +5495,9 @@ function logDiag() {
     if (LIVE.swapped?.length || LIVE.leftovers?.length) d.heroChanges = { swapped: LIVE.swapped || [], leftovers: LIVE.leftovers || [] };   // v2.8.5
     d.deathReplay = LIVE.deathReplay || (LIVE.cols ? { table: !!LIVE.cols.evDeath } : null);   // v3.0 investigation
     d.matchEnd = { how: LIVE.endHow || null, endsWithoutGameOver: LIVE.endChecks || 0, gameOver: LIVE.gameOver || null, gameOverStream: !!LIVE.cols?.evGameOver };   // v2.8.3
-    d.spectateFails = LIVE.spectateFails?.length ? LIVE.spectateFails.map(f => ({ status: f.status, reason: f.reason, auto: f.auto })) : null;
+    d.spectateFails = LIVE.spectateFails?.length ? LIVE.spectateFails.map(f => ({ status: f.status, reason: f.reason, auto: f.auto,
+      ...(f.type !== undefined ? { type: f.type, limit: f.limit, period: f.period, requests: f.requests, wait: f.wait } : {}) })) : null;
+    d.urlVia = LIVE.urlVia || null;
     d.heroesFromMatch = S.heroesAdded?.length ? S.heroesAdded : null;   // heroes the game data didn't list yet (v2.8.1)
     d.schemaSummary = String(store.get("liveCols")?.summary || "").split("\n").filter(l => /^(Controller|Pawn) columns/.test(l)).join("\n").slice(0, 3000);   // column names only
     // Why the skill bracket is what it is (no account numbers): a saved Steam account, your rank, the lobby lookup.
@@ -5212,7 +5584,8 @@ function logSnapshot(view, ready) {
       lists: { counters: top("counters"), build: top("build"), situational: top("situational"), core: top("core") },
       slots: view.slots ? [view.slots.used, view.slots.cap] : null, stats: rankChoice().label, egg: $("eggNote")?.hidden ? null : $("eggNote")?.dataset.action || null,
       // Each hero's net worth (by hero, never by player), so replays can tell who was ahead (fed enemies count more).
-      nw: LIVE.id && LIVE.roster.size ? Object.fromEntries([...LIVE.roster].map(([h, p]) => [h, Math.round(Number(p.nw) || 0)])) : null });
+      nw: LIVE.id && LIVE.roster.size ? Object.fromEntries([...LIVE.roster].map(([h, p]) => [h, Math.round(Number(p.nw) || 0)])) : null,
+      build: view.identity ? view.identity.kind : null });   // v3.4: how the tool read your build
     r.updated = new Date().toISOString();
     logSave();
   } catch {}
@@ -5530,6 +5903,18 @@ function shortReason(s, kind, why, opts = {}) {
   const out = weakCounter(s) ? "Weak overall, so not planned · " + txt : txt;
   return s.fitZ >= STRONG_Z ? out + " · fits your build" : out;
 }
+/* Why a big item outside your committed build is still suggested (v3.4, see offBuildReason). */
+function offBuildWords(s) {
+  const r = { counter: "it counters this enemy team", needs: "this match needs what it does", fit: "it works with your items", kind: `players who own your items do well with ${KIND_WORD[s.item.item_slot_type]} items` }[s.offBuild?.reason];
+  return r ? `Outside your ${s.offBuild.kind} build, but ${r}` : "";
+}
+/* Build fit by kind (v3.4) in words, for the details: [text, number, "up"|"down"] or null when it's too small to mention. */
+function catFitRow(s) {
+  const c = s.catInfo || null, v = s.catFit || 0;
+  if (!c || Math.abs(v) < 0.002) return null;
+  const names = (c.anchors || []).slice(0, 3).map(itemName).join(", ");
+  return [`Players who own your ${names} do ${v > 0 ? "better" : "worse"} with ${KIND_WORD[s.item.item_slot_type]} items`, `${pts(c.lift)}%`, v > 0 ? "up" : "down"];
+}
 /* A counter or situational item whose overall value is below zero and that the buy order leaves out. */
 function weakCounter(s) { return !!(s && s.base && itemValue(s) < 0 && !(S.view?.order || []).some(st => st.s.item.id === s.item.id) && ((s.vs || []).some(v => v.lift > 0) || s.mechWhy?.length)); }
 
@@ -5705,7 +6090,7 @@ function threeParts(entry, souls, view = S.view) {
   const total = entry.cumulative ?? s.cost, need = Math.max(0, total - souls);
   // Why this item: what it does for you (the problem it answers, your hero, your build), never when to buy it (that's Why now).
   // The plan's step ("Upgrade Mystic Vulnerability") says what; the reason says why.
-  const whyShort = [entry.why ? entry.why.replace(/\s*\([^)]*\)\s*$/, "") : "", shortReason(s, kind, null, { timing: false })].filter(Boolean).join(" · ");
+  const whyShort = [s.offBuild?.reason ? offBuildWords(s) : "", entry.why ? entry.why.replace(/\s*\([^)]*\)\s*$/, "") : "", shortReason(s, kind, null, { timing: false })].filter(Boolean).join(" · ");
   const helps = (s.vs || []).filter(v => v.lift > 0 && v.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 2).map(v => `${pts(v.lift)}% win rate against ${heroName(v.enemyId)}`);
   const whyLong = [verdictFor(s, kind), ...(s.mechWhy || []).slice(0, 2).map(w => w + "."), helps.length ? `Statistics: ${helps.join(", ")}.` : "",
     (s.mechInfo || [])[0] ? `Enemy abilities: ${s.mechInfo[0]} (for information).` : ""].filter(Boolean).join(" ");
@@ -6136,11 +6521,19 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   // The enemies' abilities (v2.10): what this answers, for information (not counted in its rank: see KIT_W).
   const kitInfo = (s.mechInfo || []).map(x => [x[0].toUpperCase() + x.slice(1), null]);
   if (s.amp && !s.amp.none) fits.push([`Amplifies your healing from ${s.amp.sources.slice(0, 3).join(", ")}${s.amp.sources.length > 3 ? " and more" : ""}`, null]);
+  const cfr = catFitRow(s);
+  if (cfr && cfr[2] === "up") fits.push(cfr);
+  if ((s.satPen || 0) <= -0.001 && s.satInfo) fits.push([`Few survival items so far: ${Math.round(s.satInfo.share * 100)}% of your souls, while ${heroName(S.me)} players usually have about ${Math.round(s.satInfo.usual * 100)}% by now. Players who add one then do better`, `+${(-s.satPen * 100).toFixed(1)}%`, "up"]);
   const warns = [...(s.vs || []).filter(x => x.z <= -WEAK_Z).map(x => [`vs ${heroName(x.enemyId)}`, `${pts(x.lift)}%`, "down"]),
     ...(s.fits || []).filter(f => f.z <= -WEAK_Z).map(f => [`with ${itemName(f.anchorId)} (may overlap)`, `${pts(f.lift)}%`, "down"]),
     ...(s.mechWarn || []).map(x => [x, null])];
+  if (cfr && cfr[2] === "down") warns.push(cfr);
+  if ((s.satPen || 0) >= 0.001 && s.satInfo) warns.push(s.satInfo.first
+    ? ["As one of your very first items, a survival item does a little worse than a gun or spirit item, so it counts slightly less for now", `−${(s.satPen * 100).toFixed(1)}%`, "down"]
+    : [`You already have plenty of survival items: ${Math.round(s.satInfo.share * 100)}% of your souls, while ${heroName(S.me)} players usually have about ${Math.round(s.satInfo.usual * 100)}% by now. Players who add more past that do worse, so another one counts less`, `−${(s.satPen * 100).toFixed(1)}%`, "down"]);
   if ((s.rarePenalty || 0) >= 0.003) warns.push([`Few ${heroName(S.me)} players buy it at this stage (${Math.max(0.1, Math.round((s.popShare || 0) * 1000) / 10)}% as many as the most popular item), so it needs a strong reason`, null]);
   if (s.amp?.none) warns.push([`Nothing to amplify: ${it.name} works with healing you apply${s.amp.noLifesteal ? " (abilities or items that heal, not lifesteal or regen)" : " (lifesteal, or abilities and items that heal)"}. Your hero's abilities don't heal and you own nothing that does, so only its basic stats count and it isn't planned.`, null]);
+  else if (s.offBuild && !s.offBuild.reason) warns.push([`Outside your ${s.offBuild.kind} build, and nothing in this match calls for it (no clear counter, no strong fit with your items), so it isn't planned`, null]);
   else if (lacksReason(s)) warns.push(["Out of its stage, and nothing in this match calls for it, so it isn't planned", null]);
   if (weakCounter(s) && kind !== "owned") warns.push([`It answers something in this match, but ${heroName(S.me)} players who buy it at this point do worse overall (${pts(itemValue(s))}% win rate all told), so it isn't in the buy order`, null]);
   if (s.overlap) warns.push([`Does the same job as ${s.overlap.with}, which you own (${TAG_NAMES[s.overlap.tag]}): only ${Math.round(s.overlap.factor * 100)}% of its usual advantage counts`, null]);
@@ -6288,7 +6681,7 @@ function renderResultsInner() {
   for (const id of Object.keys(S.boughtInfo)) if (!S.owned.has(Number(id))) delete S.boughtInfo[id];
   const bought = {};
   for (const id of S.owned) bought[id] = S.boughtInfo[id] || { sec: S.boughtAt?.[id] ?? null, rate: null };
-  const { order, groups, scoredById, match, ownedRates, ownedInfo, purchaseValues } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
+  const { order, groups, scoredById, match, ownedRates, ownedInfo, purchaseValues, identity } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
     prog: S.prog, owned: S.owned, souls, lane: S.lane, threatW, fed, fl, sec, curve: S.curve, slotCap: slotsNow.cap, skipped, prevOrder: S.prevOrder,
     roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me), bought, ...kitsNow(),
     stageAt: ph => { const e = S.cache[dataKey(ph)]; return e && e.ready ? { entry: e, all: allRanksNow(ph) } : null; } });   // statistics already loaded, never a new request
@@ -6310,7 +6703,7 @@ function renderResultsInner() {
     + `items bought during ${ready.map(p => PHASE_NAMES[p.phase].toLowerCase()).join(" and ")}${ready.length > 1 ? " (blended)" : ""}. `
     + (fl ? "Item values are adjusted for how far ahead buyers were. " : "")
     + `Biggest single sample: ${biggest.toLocaleString()} games. Fetched ${e0.fetchedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}.`;
-  S.view = { souls, order, groups, scoredById, label, threat, match, empty: !e0.baseline.length, slots: slotsNow, at: Date.now(), prelim, ownedRates, ownedInfo, thin: e0.baseline.length > 0 && most < MIN_BRACKET_GAMES ? most : null };
+  S.view = { souls, order, groups, scoredById, label, threat, match, identity, empty: !e0.baseline.length, slots: slotsNow, at: Date.now(), prelim, ownedRates, ownedInfo, thin: e0.baseline.length > 0 && most < MIN_BRACKET_GAMES ? most : null };
   renderBoard();
   scheduleFit();
   logSnapshot(S.view, ready);
