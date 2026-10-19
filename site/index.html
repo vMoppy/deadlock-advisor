@@ -425,7 +425,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.5</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.5.1</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -718,10 +718,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.5";   // shown in the top bar and written into match records
+const VERSION = "v3.5.1";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.5.1", date: "October 19, 2026", items: [
+    "Live Match uses one connection fewer per match: a listener for death summaries, which never received anything in a real match, is gone.",
+    "Behind the scenes: unused code removed and the roadmap shortened to one page. Recommendations are unchanged."] },
   { v: "v3.5", date: "October 19, 2026", items: [
     "Live Match: when the data service's shared limit is reached, the tool keeps checking (for free) whether your match can be connected and connects by itself, and tries once more when the limit frees up. Matches whose broadcast Valve never starts are said plainly instead of retrying for minutes.",
     "Optional: a personal key for the data service (under How to connect › If it doesn't work) uses its own, separate limit. Kept in this browser only.",
@@ -1625,14 +1628,9 @@ function enemyShifts(base, perEnemy) {
     return { enemyId, idx, shift: weightedMedian(diffs) };
   });
 }
-function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, cat = {}, committed = false, threat = new Map(), covered = new Map(), laneRows = null, all = null }) {
+function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, cat = {}, committed = false, threat = new Map(), covered = new Map(), laneRows = null }) {
   const base = new Map(baseline.map(r => [r.item_id, r]));
   const enemies = enemyShifts(base, perEnemy);
-  /* All-ranks counters (v2.9.1, with RANK_PRIOR.ctrCorr): the same comparison over every rank, blended with your rank's
-     (rankBlend). all: { baseline, perEnemy } at all ranks for this stage. */
-  const ctrCorr = typeof RANK_PRIOR.ctrCorr === "object" ? RANK_PRIOR.ctrCorr?.[phase] || 0 : RANK_PRIOR.ctrCorr || 0;
-  const allBase = RANK_PRIOR.on && ctrCorr && all?.baseline ? new Map(all.baseline.map(r => [r.item_id, r])) : null;
-  const allEn = allBase ? new Map(enemyShifts(allBase, all.perEnemy || []).map(x => [x.enemyId, x])) : new Map();
   /* Lane counters (v2.8): in the laning stage, statistics against a lane opponent from games where the buyer laned
      against that hero (same_lane_filter). There are fewer such games, so each item's lane result is blended with its
      whole-match result by sample size (laneBlend). */
@@ -1665,13 +1663,7 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
       const z = lift / se;
       const weight = (threat.get(enemyId) || 1) * (phase === "lane" && laneIds.has(enemyId) ? 2 : 1);
       vs.push({ enemyId, lift, z, n: r.matches, pe, shift, lane: laneInfo });
-      const A = allEn.get(enemyId), ar = A?.idx.get(it.id), ab = allBase?.get(it.id);
-      if (ar && ab && ar.matches >= MIN_GAMES && ab.matches >= MIN_GAMES) {
-        const pa = wr(ar), pab = wr(ab), la = pa - pab - A.shift, ea = pa * (1 - pa) / ar.matches + pab * (1 - pab) / ab.matches;
-        const t2 = TAU_ENEMY * TAU_ENEMY;
-        score += rankBlend(lift, se * se, la, ea, Math.min(1, r.matches / ar.matches) * se * se, t2, t2, ctrCorr * t2) * weight;
-        vs[vs.length - 1].all = { lift: la, n: ar.matches };
-      } else score += lift * trust(se, TAU_ENEMY) * weight;
+      score += lift * trust(se, TAU_ENEMY) * weight;
       num += weight * lift; den += (weight * se) ** 2;
       if (z > best) best = z;
     }
@@ -1743,29 +1735,7 @@ function mergeScored(lists) {
    buy them sooner. Each item's value is its adjusted win rate minus the stage average, shrunk for small
    samples. Comparing the stages also shows timing: items that do well early but badly when bought late. */
 const FLOW_COLS = ["0-9 min", "9-20 min", "20-30 min", "30+ min"];
-/* All-ranks values as a guide for your rank's (v2.9.1, see rankBlend): built and tested, not used (on: false).
-   Measured on real statistics (7 heroes, three rank ranges as wide as "Automatic"): an item's stage value at a rank agrees
-   closely with its all-ranks value (corr: 0.5 to 0.96 by stage and rank; sdAll: how much all-ranks values differ), and for
-   counters the all-ranks numbers hold about ten times the information (an item's real edge against one enemy is about 0.4 to
-   0.5 points; your rank's numbers measure it with 3 points of noise, all ranks with 0.8).
-   Tested on the backtest (statistics from before the matches, and a holdout rank range not used to set anything):
-   - stage values (stage): agreement with winners +1.4 to +1.6 points, but the advice edge 0.2 points lower in both samples
-     (not significant), and on the holdout the values predicted wins no better than your rank's alone;
-   - counters (ctrCorr): only in the laning stage did they predict (later stages: no); there, the advice edge -0.04 and +0.22
-     (both within noise).
-   Neither is a clear improvement, so both stay off (each would cost extra requests). Replays and tests can switch them on.
-   sdRank: spread of true values at a rank (null: TAU_ITEM); per stage column. ctrCorr: per stage (lane, mid, late). */
-const RANK_PRIOR = { on: false, sdRank: null, sdAll: [0.029, 0.034, 0.04, 0.042], corr: [0.74, 0.62, 0.88, 0.85], ctrCorr: { lane: 0.75 } };
-/* The best estimate of an item's true value at your rank from two measurements: xb at your rank (sampling variance eb) and
-   xa at all ranks (variance ea, sharing the games of your rank: covariance ce). vb: how much true values vary at a rank
-   (TAU_ITEM squared), va: at all ranks, c: how much the two move together. With c = 0 it's the usual shrinkage of xb toward
-   zero (trust); with all ranks measured precisely and closely related, a thin rank's value moves toward the all-ranks one. */
-function rankBlend(xb, eb, xa, ea, ce, vb, va, c) {
-  const a = vb + eb, d = va + ea, b = c + ce, det = a * d - b * b;
-  if (!(det > 0)) return xb * vb / (vb + eb);
-  return ((vb * d - c * b) * xb + (c * a - vb * b) * xa) / det;
-}
-function flowLifts(nodes, tierOf = () => null, prior = null) {
+function flowLifts(nodes, tierOf = () => null) {
   const cols = FLOW_COLS.length;
   const byCol = Array.from({ length: cols }, () => []);
   for (const n of nodes || []) if (n.column < cols && n.matches > 0 && Number.isFinite(n.adjusted_win_rate)) byCol[n.column].push(n);
@@ -1792,11 +1762,8 @@ function flowLifts(nodes, tierOf = () => null, prior = null) {
     if (n.matches >= MIN_GAMES) {
       const raw = n.adjusted_win_rate - tierMean(c, tierOf(n.item_id)), p = n.adjusted_win_rate;
       const se = Math.sqrt(Math.max(0.01, p * (1 - p)) / n.matches);
-      // With all-ranks values (prior: flowLifts of the all-ranks statistics), a rank's value is blended with them (rankBlend).
-      const pa = RANK_PRIOR.on && RANK_PRIOR.stage !== false ? prior?.items?.get(n.item_id)?.cols?.[c] : null, sr = RANK_PRIOR.sdRank?.[c] ?? TAU_ITEM;
-      const lift = pa ? rankBlend(raw, se * se, pa.raw, pa.se * pa.se, Math.min(1, n.matches / pa.n) * se * se, sr * sr,
-        RANK_PRIOR.sdAll[c] ** 2, RANK_PRIOR.corr[c] * sr * RANK_PRIOR.sdAll[c]) : raw * trust(se, TAU_ITEM);
-      e.cols[c] = { raw, lift, n: n.matches, p, nw: n.avg_net_worth_at_buy, se, ...(pa ? { fromAll: pa.raw } : {}) };
+      const lift = raw * trust(se, TAU_ITEM);
+      e.cols[c] = { raw, lift, n: n.matches, p, nw: n.avg_net_worth_at_buy, se };
     }
     items.set(n.item_id, e);
   }
@@ -2897,7 +2864,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const lists = ready.map(p => {
     const e = p.entry;
     return { w: p.w / wsum, scored: scoreItems({ baseline: e.baseline, perEnemy: e.ready ? e.perEnemy : [], items, owned, souls,
-      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, cat: CAT_FIT_W ? e.catFit || {} : {}, committed: !!identity.off, threat: threatW, covered, laneRows: p.laneRows || null, all: p.all || e.all || null }) };
+      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, cat: CAT_FIT_W ? e.catFit || {} : {}, committed: !!identity.off, threat: threatW, covered, laneRows: p.laneRows || null }) };
   });
   const merged = mergeScored(lists);
   // Stage value without the wealth bias, and timing (flow data; optional).
@@ -2984,7 +2951,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   // this, an item bought as a counter could be suggested for sale a few minutes later (Spirit Shredder, Graves).
   const ctrOf = (list, stages) => new Map(mergeScored(stages.map(p => ({ w: p.w, scored: scoreItems({ baseline: p.entry.baseline,
     perEnemy: p.entry.ready ? p.entry.perEnemy : [], items: list, owned: new Set(), souls, itemByClass,
-    laneIds: lane, phase: p.phase, threat: threatW, all: p.all || p.entry.all || null }) }))).map(x => [x.item.id, x.score || 0]));
+    laneIds: lane, phase: p.phase, threat: threatW }) }))).map(x => [x.item.id, x.score || 0]));
   const ownCtr = ctrOf(ownedItems, ready.map((p, k) => ({ ...p, w: lists[k].w })));
   /* v3.0.2: like its stage value (below), an item's counters are read from the stage you bought it in: the players who bought
      it then, whose results cover the rest of their match. Up to v3.0.1 they came from the current stage, so at 20:00 an item
@@ -3004,7 +2971,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     for (const [ph, list] of byPhase) {
       const sd = stageAt(ph);
       if (!sd?.entry?.ready) continue;
-      for (const [id, v] of ctrOf(list, [{ phase: ph, w: 1, entry: sd.entry, all: sd.all || null }])) ownCtr.set(id, v);
+      for (const [id, v] of ctrOf(list, [{ phase: ph, w: 1, entry: sd.entry }])) ownCtr.set(id, v);
     }
   }
   /* v2.8.6: an item is valued as owned the way it was valued as a purchase, so buying it doesn't make it look weak.
@@ -3097,8 +3064,7 @@ const aliveAt = (p, t) => !(p.deaths || []).some(([d, len]) => t >= d && t < d +
 /* Run the engine for one player at the given game times, in order, carrying the plan and purchase memory from one moment to
    the next as the page does. st: the statistics, as the page holds them: { stages: { lane|mid|late: { baseline, perEnemy:
    { enemy: rows }, fit: { anchor: rows } } }, laneVs: { enemy: rows }, fl (flowLifts result with matchLen and lean),
-   curve, matchups: hero-counter rows, pairs (optional): { whole: whole-match item rows, pairs: item pair rows }, all (optional):
-   { stages: { lane|mid|late: { baseline, perEnemy } } } at all ranks }. G: { items,
+   curve, matchups: hero-counter rows, pairs (optional): { whole: whole-match item rows, pairs: item pair rows } }. G: { items,
    itemById, itemByClass, prog }. onMoment(info) gets each moment. */
 function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abilities = [], slotCap = null, onMoment, kitOf = null, kitAvg = null }) {
   const hero = p.hero;
@@ -3123,10 +3089,8 @@ function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abili
       const perAnchor = anchors.filter(a => s.fit?.[a]).map(a => ({ anchorId: a, rows: s.fit[a] }));
       const stageFit = perAnchor.length ? buildFit(s.baseline, perAnchor) : {};
       const stageCat = perAnchor.length ? catFit(s.baseline, perAnchor, G.itemById) : {};
-      const a = st.all?.stages?.[pp.phase];
       return { ...pp, entry: { ready: true, baseline: s.baseline, perEnemy: enemies.filter(e => s.perEnemy?.[e]).map(e => ({ enemyId: e, rows: s.perEnemy[e] })),
-        fitMap: pf ? mergeFits(stageFit, pf, anchors) : stageFit, catFit: stageCat, fit: { perAnchor },
-        all: a ? { baseline: a.baseline, perEnemy: enemies.filter(e => a.perEnemy?.[e]).map(e => ({ enemyId: e, rows: a.perEnemy[e] })) } : null },
+        fitMap: pf ? mergeFits(stageFit, pf, anchors) : stageFit, catFit: stageCat, fit: { perAnchor } },
         laneRows: pp.phase === "lane" ? new Map([...laneIds].filter(e => st.laneVs?.[e]).map(e => [e, st.laneVs[e]])) : null };
     });
     const threat = threatWeights(st.matchups || [], hero, enemies), fed = fedWeights(roster, enemies);
@@ -3137,9 +3101,9 @@ function replayPlayer({ match, p, st, G, times, heroName = id => `#${id}`, abili
     const cap = slotCap ?? Math.max(BASE_SLOTS, maxHeld);
     const res = computePlan({ ready, items: G.items, itemById: G.itemById, itemByClass: G.itemByClass, prog: G.prog, owned, souls, lane: laneIds, threatW, fed,
       fl: st.fl || null, sec: t, curve: st.curve || [], slotCap: cap, skipped: new Set(), prevOrder, roster, me: hero, heroName, abilities, bought, kitOf, kitAvg,
-      stageAt: ph => { const s = st.stages[ph], a = st.all?.stages?.[ph]; if (!s) return null;
+      stageAt: ph => { const s = st.stages[ph]; if (!s) return null;
         const pe = x => enemies.filter(e => x.perEnemy?.[e]).map(e => ({ enemyId: e, rows: x.perEnemy[e] }));
-        return { entry: { ready: true, baseline: s.baseline, perEnemy: pe(s) }, all: a ? { baseline: a.baseline, perEnemy: pe(a) } : null }; } });
+        return { entry: { ready: true, baseline: s.baseline, perEnemy: pe(s) } }; } });
     lastPV = res.purchaseValues; lastOwned = owned;
     prevOrder = res.order.map(x => ({ id: x.s.item.id, kind: x.kind, cost: x.s.cost }));
     onMoment({ t, owned, held, souls, nw, cap, alive: aliveAt(p, t), res });
@@ -3899,15 +3863,10 @@ function ensureFlow() {
   const [minB, maxB] = rankBounds();
   const q = new URLSearchParams({ hero_ids: S.me, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: timeWindow().from, min_matches: MIN_GAMES });
   const f = S.flow = { key, loading: true };
-  // With a rank range, the same numbers over all ranks too (v2.9.1, RANK_PRIOR): they steady your rank's values. Optional:
-  // if they fail, your rank's values are used alone, as before.
-  const narrow = RANK_PRIOR.on && !(minB <= 0 && maxB >= 116);
-  const qa = new URLSearchParams({ hero_ids: S.me, min_unix_timestamp: timeWindow().from, min_matches: MIN_GAMES });
-  Promise.all([getJSON(`/v1/analytics/item-flow-stats?${q}`), narrow ? getJSON(`/v1/analytics/item-flow-stats?${qa}`).catch(() => null) : null]).then(([res, all]) => {
+  getJSON(`/v1/analytics/item-flow-stats?${q}`).then(res => {
     if (S.flow !== f) return;
     const tierOf = id => S.itemById[id]?.item_tier ?? null;
-    const prior = Array.isArray(all?.nodes) && all.nodes.length ? flowLifts(all.nodes, tierOf) : null;
-    Object.assign(f, flowLifts(res.nodes, tierOf, prior), { rawNodes: res.nodes, allNodes: prior ? all.nodes : null, loading: false, ready: true, matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
+    Object.assign(f, flowLifts(res.nodes, tierOf), { rawNodes: res.nodes, loading: false, ready: true, matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
     // How much your hero's players lean on gun vs spirit items, for when you own little yet.
     let w = 0, sp = 0;
     for (const n of res.nodes || []) { const it = S.itemById[n.item_id]; if (!it) continue; if (it.item_slot_type === "weapon") w += n.matches; if (it.item_slot_type === "spirit") sp += n.matches; }
@@ -3952,27 +3911,6 @@ async function refreshFit() {
     entry.fitMap = mergeFits(entry.stageFit, P ? pairFit(P.whole, P.pairs, others) : {}, anchors);
     renderResults();
   }
-}
-/* All-ranks counters (v2.9.1): for a stage where RANK_PRIOR.ctrCorr uses them (the laning stage) and a rank range, the same
-   statistics as the stage's over every rank: your hero's items and each enemy (7 requests), kept for the session. Optional:
-   until they arrive, or if they fail, your rank's counters are used alone. */
-function allRanksNow(phase) {
-  const cc = typeof RANK_PRIOR.ctrCorr === "object" ? RANK_PRIOR.ctrCorr?.[phase] || 0 : RANK_PRIOR.ctrCorr || 0;
-  const [minB, maxB] = rankBounds();
-  if (!RANK_PRIOR.on || !cc || !S.me || !S.enemies.length || (minB <= 0 && maxB >= 116)) return null;
-  const k = [S.me, [...S.enemies].sort().join(","), timeWindow().from, phase].join("|"), have = (S.allStats ||= {})[k];
-  if (have?.ready) return have;
-  if (have && !(have.failedAt && Date.now() - have.failedAt > 60000)) return null;   // loading, or failed a moment ago
-  const [fromS, toS] = PHASES[phase];
-  const q = new URLSearchParams({ hero_ids: S.me, min_unix_timestamp: timeWindow().from, min_matches: 1, min_bought_at_s: fromS, corrupted_items: "exclude" });
-  if (toS) q.set("max_bought_at_s", toS);
-  const e = S.allStats[k] = { key: k, phase };
-  const enemies = [...S.enemies];
-  Promise.all([getJSON(`/v1/analytics/item-stats?${q}`), ...enemies.map(x => getJSON(`/v1/analytics/item-stats?${q}&enemy_hero_ids=${x}`))]).then(([baseline, ...rest]) => {
-    if (!Array.isArray(baseline) || rest.some(r => !Array.isArray(r))) throw new Error("unexpected format");
-    Object.assign(e, { baseline, perEnemy: enemies.map((x, i) => ({ enemyId: x, rows: rest[i] })), ready: true }); renderResults();
-  }).catch(err => { e.failedAt = Date.now(); e.error = String(err?.message || err).slice(0, 120); });
-  return null;
 }
 /* Item pairs for your hero, rank and period (v2.8.2): one request for the pairs and one for whole-match item statistics,
    kept for the session. Only needed once you own more than three items. Until they arrive, or if they fail, the fit
@@ -4892,7 +4830,7 @@ function unlinkMatch(quiet) {
   linkSeq++;   // any link still starting is now stale
   if (!quiet) cancelHeldWatch();
   for (const k in LIVE.streams) LIVE.streams[k].stop();
-  Object.assign(LIVE, { streams: {}, deathReplay: null, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
+  Object.assign(LIVE, { streams: {}, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
     itemsOk: false, itemsChecked: false, idSeen: 0, idKnown: 0, idSamples: [], knownSet: null, rawItemSample: "", rawSoulsSample: "", soulsRows: 0, invSig: "", souls: null, nw: null, meHow: null,
     thinRejected: null, laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
     connecting: false, urlVia: null, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, ownLivePrev: null, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0, neverStarted: false, settleHeld: 0 });
@@ -4984,22 +4922,6 @@ function startGameOverStream() {
     if (r.test === true || r.test === 1 || r.test === "true") return;   // the game's own test message, not a real end
     LIVE.gameOver = { tick: r.tick != null ? Number(r.tick) : null, winner: r.winner ?? null };
     matchEnded("confirmed");
-  });
-}
-/* The death summary (v3.0, an investigation): its shape and size are kept in the match record, so a later version can decide
-   whether to use "what's actually hurting you" (gun or spirit damage, and from whom) for resist advice. Only while recording;
-   the first three summaries are kept (other players' accounts are never part of them: the columns are entity numbers and
-   damage), then the stream stops. Nothing in the advice uses it yet. */
-const DEATH_SAMPLES = 3;
-function startDeathStream() {
-  const c = LIVE.cols;
-  if (LIVE.streams.death || !LIVE.url || !c?.evDeath || !LIVE.applied || !LOG.on || (LIVE.deathReplay?.samples.length >= DEATH_SAMPLES)) return;
-  LIVE.deathReplay ||= { rows: 0, bytes: 0, samples: [], columns: ["tick", "killer_scorer", "killer_inflictor", "damage_summary"] };
-  LIVE.streams.death = liveStream("death", `SELECT * FROM ${qtable(c.evDeath)}`, r => {
-    const D = LIVE.deathReplay, txt = JSON.stringify(r);
-    D.rows++; D.bytes += txt.length;
-    if (D.samples.length < DEATH_SAMPLES) D.samples.push(txt.slice(0, 4000));
-    if (D.samples.length >= DEATH_SAMPLES) { LIVE.streams.death?.stop(); delete LIVE.streams.death; }
   });
 }
 function startRulesStream() {
@@ -5495,7 +5417,7 @@ function applyRoster() {
     LIVE.applied = true; S.lastMatchId = LIVE.id; saveMatch(); tlMark("teams set up");
     if (!S.active && S.enemies.length) recommend();
   }
-  startSoulsStream(); startRulesStream(); startTeamStream(); startGameOverStream(); startDeathStream();
+  startSoulsStream(); startRulesStream(); startTeamStream(); startGameOverStream();
   if (!LIVE.lobby || LIVE.lobby.matchId !== LIVE.id) { if (!LIVE.lobbyRetryAt || Date.now() > LIVE.lobbyRetryAt) fetchLobbyRank(); }
   if (S.active && (invChanged || teamChanged || laneChanged)) renderResults();
   // One message per stage (teams from the Watch list, then fully live), never repeated or written over
@@ -5610,7 +5532,10 @@ function logDiag() {
     d.thin = LIVE.thin ?? null; d.thinRejected = LIVE.thinRejected || null; d.deathSamples = LIVE.deathSamples || null; d.deaths = (S.deaths || []).slice(0, 40);
     d.replayedRowsIgnored = LIVE.replayedRows || 0;
     if (LIVE.swapped?.length || LIVE.leftovers?.length) d.heroChanges = { swapped: LIVE.swapped || [], leftovers: LIVE.leftovers || [] };   // v2.8.5
-    d.deathReplay = LIVE.deathReplay || (LIVE.cols ? { table: !!LIVE.cols.evDeath } : null);   // v3.0 investigation
+    /* The death summary (DeathReplayDataEvent): a v3.0 investigation listened for it in every recorded match and got nothing in
+       any of them (0 rows in all 5 records of October 17-18), while holding a live connection, so v3.5.1 stopped asking for it.
+       Only whether the broadcast lists the table is kept, for a later look at "what's hurting you". */
+    d.deathReplay = LIVE.cols ? { table: !!LIVE.cols.evDeath } : null;
     d.matchEnd = { how: LIVE.endHow || null, endsWithoutGameOver: LIVE.endChecks || 0, gameOver: LIVE.gameOver || null, gameOverStream: !!LIVE.cols?.evGameOver };   // v2.8.3
     d.spectateFails = LIVE.spectateFails?.length ? LIVE.spectateFails.map(f => ({ status: f.status, reason: f.reason, auto: f.auto,
       ...(f.type !== undefined ? { type: f.type, limit: f.limit, period: f.period, requests: f.requests, wait: f.wait } : {}) })) : null;
@@ -5664,13 +5589,6 @@ function logSnapshot(view, ready) {
       const row = x => [x.item_id, x.wins, x.matches, x.players, Math.round(x.avg_buy_time_s || 0)];
       r.stats[e.key] = { phase: p.phase, query: e.q, baseline: e.baseline.map(row), perEnemy: e.perEnemy.map(pe => [pe.enemyId, pe.rows.map(row)]) };
     }
-    // All-ranks counters (v2.9.1), once per stage, so replays use them too.
-    for (const p of ready) {
-      if (!p.all?.ready) continue;
-      const row = x => [x.item_id, x.wins, x.matches, x.players, Math.round(x.avg_buy_time_s || 0)];
-      r.allStats ||= {};
-      if (!r.allStats[p.all.key]) r.allStats[p.all.key] = { phase: p.phase, baseline: p.all.baseline.map(row), perEnemy: p.all.perEnemy.map(pe => [pe.enemyId, pe.rows.map(row)]) };
-    }
     // Lane counters (v2.8): each lane opponent's lane-only statistics, once.
     for (const p of ready) {
       const st = r.stats[p.entry.key]; if (!st || !p.laneRows) continue;
@@ -5696,7 +5614,6 @@ function logSnapshot(view, ready) {
     const flowRow = n => [n.column, n.item_id, n.wins, n.losses, n.matches, n.players, n.adjusted_win_rate, Math.round(n.avg_net_worth_at_buy || 0)];
     if (!r.flow && S.flow?.ready && S.flow.rawNodes) r.flow = { key: S.flow.key, matchLen: S.flow.matchLen, nodes: S.flow.rawNodes.map(flowRow) };
     // The all-ranks stage values that guided your rank's (v2.9.1), so replays can use them too.
-    if (!r.flowAll && S.flow?.ready && S.flow.allNodes && r.flow?.key === S.flow.key) r.flowAll = { nodes: S.flow.allNodes.map(flowRow) };
     if (sig === LOG.lastSnapSig || r.snaps.length >= LOG_MAX_SNAPS) return;
     LOG.lastSnapSig = sig;
     const top = k => view.groups[k].slice(0, 5).map(s => s.item.id);
@@ -5881,23 +5798,12 @@ async function reviewStats(hero, enemies, laneIds, anchors) {
     for (const e of enemies) jobs.push(() => getJSON(q({ ...pq, enemy_hero_ids: e })).then(r => { s.perEnemy[e] = r; }));
     for (const a of anchors) jobs.push(() => getJSON(q({ ...pq, include_item_ids: a })).then(r => { s.fit[a] = r; }).catch(() => {}));
   }
-  // All-ranks counters for the stages that use them (v2.9.1, RANK_PRIOR.ctrCorr), as the page does. Optional.
-  const all = { stages: {} };
-  if (RANK_PRIOR.on && !(minB <= 0 && maxB >= 116)) for (const [phase, [fromS, toS]] of Object.entries(PHASES)) {
-    if (!(typeof RANK_PRIOR.ctrCorr === "object" ? RANK_PRIOR.ctrCorr?.[phase] : RANK_PRIOR.ctrCorr)) continue;
-    const pq = { hero_ids: hero, min_unix_timestamp: from, min_matches: 1, corrupted_items: "exclude", min_bought_at_s: fromS }; if (toS) pq.max_bought_at_s = toS;
-    const s = all.stages[phase] = { baseline: [], perEnemy: {} };
-    jobs.push(() => getJSON(q(pq)).then(r => { s.baseline = r; }).catch(() => {}));
-    for (const e of enemies) jobs.push(() => getJSON(q({ ...pq, enemy_hero_ids: e })).then(r => { s.perEnemy[e] = r; }).catch(() => {}));
-  }
   const laneVs = {};
   for (const e of laneIds) jobs.push(() => getJSON(q({ ...base, min_bought_at_s: 0, max_bought_at_s: 540, enemy_hero_ids: e, same_lane_filter: "true" })).then(r => { laneVs[e] = r; }).catch(() => {}));
   let fl = null, curve = [], matchups = [];
-  const narrow = RANK_PRIOR.on && !(minB <= 0 && maxB >= 116);
-  jobs.push(() => Promise.all([getJSON(`/v1/analytics/item-flow-stats?${new URLSearchParams({ hero_ids: hero, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from, min_matches: MIN_GAMES })}`),
-    narrow ? getJSON(`/v1/analytics/item-flow-stats?${new URLSearchParams({ hero_ids: hero, min_unix_timestamp: from, min_matches: MIN_GAMES })}`).catch(() => null) : null]).then(([res, all]) => {
+  jobs.push(() => getJSON(`/v1/analytics/item-flow-stats?${new URLSearchParams({ hero_ids: hero, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from, min_matches: MIN_GAMES })}`).then(res => {
     const tierOf = id => S.itemById[id]?.item_tier ?? null;
-    fl = Object.assign(flowLifts(res.nodes, tierOf, all?.nodes?.length ? flowLifts(all.nodes, tierOf) : null), { matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
+    fl = Object.assign(flowLifts(res.nodes, tierOf), { matchLen: res.baseline?.avg_duration_s || res.summary?.avg_duration_s || null });
     let w = 0, sp = 0; for (const n of res.nodes || []) { const it = S.itemById[n.item_id]; if (!it) continue; if (it.item_slot_type === "weapon") w += n.matches; if (it.item_slot_type === "spirit") sp += n.matches; }
     fl.lean = w + sp ? { weapon: w / (w + sp), spirit: sp / (w + sp) } : null;
   }).catch(() => {}));
@@ -5908,7 +5814,7 @@ async function reviewStats(hero, enemies, laneIds, anchors) {
   // Six at a time: well within the data service's limit of 200 statistics requests a minute.
   let done = 0;
   for (let i = 0; i < jobs.length; i += 6) { await Promise.all(jobs.slice(i, i + 6).map(f => f())); done += Math.min(6, jobs.length - i); reviewStatus(`Fetching the statistics the tool would have used… ${done} of ${jobs.length}`); }
-  return { stages, all, laneVs, fl, curve, matchups };
+  return { stages, laneVs, fl, curve, matchups };
 }
 async function runReview() {
   if (REVIEW.busy) return;
@@ -6759,7 +6665,6 @@ function renderResultsInner() {
   }
   const ready = plan.map(p => ({ ...p, entry: S.cache[dataKey(p.phase)] })).filter(p => p.entry && (p.entry.ready || p.entry.baseReady));
   for (const p of ready) if (p.phase === "lane" && p.entry.ready) p.laneRows = laneRowsNow();
-  for (const p of ready) if (p.entry.ready) p.all = allRanksNow(p.phase);   // all-ranks counters (v2.9.1), where they're used
   // Item pairs: fetched while recording (kept in the match record for testing), or when they're used (PAIR_FIT.on).
   if (S.me && S.owned.size && PAIR_FIT.on) pairsNow();   // up to v2.9 also while recording, for testing: tested in v2.9.1, not used
   const prelim = ready.some(p => !p.entry.ready);
@@ -6805,7 +6710,7 @@ function renderResultsInner() {
   const { order: planned, groups, scoredById, match, ownedRates, ownedInfo, purchaseValues, identity } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
     prog: S.prog, owned: S.owned, souls, lane: S.lane, threatW, fed, fl, sec, curve: S.curve, slotCap: slotsNow.cap, skipped, prevOrder: S.prevOrder,
     roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me), bought, ...kitsNow(),
-    stageAt: ph => { const e = S.cache[dataKey(ph)]; return e && e.ready ? { entry: e, all: allRanksNow(ph) } : null; } });   // statistics already loaded, never a new request
+    stageAt: ph => { const e = S.cache[dataKey(ph)]; return e && e.ready ? { entry: e } : null; } });   // statistics already loaded, never a new request
   if (!prelim) { S.lastPV = purchaseValues; S.lastOwned = new Set(S.owned); }
   // A calmer first step during a live match (v3.5, see settleFirst): the shown plan stays while a new first step settles.
   const ownedSig = [...S.owned].sort((a, b) => a - b).join(",");
