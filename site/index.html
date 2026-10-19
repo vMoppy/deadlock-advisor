@@ -425,7 +425,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.4</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.5</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -509,7 +509,9 @@
           <span><b>"Not found in the Watch list":</b> normal for most matches. Use the match ID.</span>
           <span><b>"Your Steam account isn't in this match":</b> check the match ID (it changes every match) and the saved account (Change, above).</span>
           <span><b>Nothing arrives for a minute or two:</b> the broadcast starts a little after the match does, and runs 1 to 2 minutes behind. The tool keeps trying by itself.</span>
-          <span><b>Connection limit:</b> the data service allows 6 new match connections per hour (failed tries count too). Reconnecting to the same match within an hour is free.</span>
+          <span><b>Connection limit:</b> the data service allows 6 new match connections per hour (failed tries count too). Reconnecting to the same match within an hour is free, and so is a match the data service is already watching.</span>
+          <span><b>"At its limit for all users":</b> everyone who uses the data service without a key shares one allowance of new matches, and at busy times it runs out (October 2026: another app uses most of it). The tool then checks every 20 s whether your match has become free to connect to, and tries once by itself when the allowance frees up. A personal key from the data service (from its Patreon, GitHub sponsorship or Discord) uses a separate allowance:</span>
+          <span class="rowflex"><input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Deadlock API key (optional)" aria-label="Deadlock API key (optional)"><button id="apiKeySave" class="btn tiny" type="button">Save key</button><span id="apiKeyNote" class="muted small"></span></span>
           <span><b>Still stuck?</b> Manual setup below works without any connection.</span>
         </details>
       </details>
@@ -716,10 +718,17 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.4";   // shown in the top bar and written into match records
+const VERSION = "v3.5";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.5", date: "October 19, 2026", items: [
+    "Live Match: when the data service's shared limit is reached, the tool keeps checking (for free) whether your match can be connected and connects by itself, and tries once more when the limit frees up. Matches whose broadcast Valve never starts are said plainly instead of retrying for minutes.",
+    "Optional: a personal key for the data service (under How to connect › If it doesn't work) uses its own, separate limit. Kept in this browser only.",
+    "Your build is read earlier (from about 3,200 souls in gun and spirit items, when most are one kind), and items outside it need a reason sooner.",
+    "A second item that does the same job as one you own (Unstoppable after Indomitable) needs a reason in the match.",
+    "\"Does well against these enemies\" counts only as much as it predicted winning, by item kind and stage: fewer green items picked as counters.",
+    "During a live match the first suggestion changes less: a new one shows once it has held for 10 seconds, except at once after your purchase or for a new answer to the match."] },
   { v: "v3.4", date: "October 18, 2026", items: [
     "The tool reads your build: gun, spirit, hybrid or still developing (shown under your items). Once you've committed, big items of the other kind are suggested only when something in the match calls for them, and the explanation says what.",
     "Fewer green items in a row: a survival item counts less once you already have more than players of your hero usually do, and more when you have few. Green items that counter the enemy team still come first.",
@@ -946,7 +955,19 @@ const VIT_SAT = { low: [0.25, 0.6], high: [1.1, 1.5], minSpend: 1500,
    at least "committed" of those souls are in one kind, otherwise hybrid. A committed build's big items of the other kind (tier
    bigTier and up) are planned only with a reason in this match (Moppy, October 17: "there should be a clear gameplay reason for
    recommending a significant investment outside my established build"). */
-const BUILD_ID = { minDamage: 6000, committed: 0.7, bigTier: 3 };
+const BUILD_ID = { minDamage: 6000, committed: 0.7, bigTier: 3, leanDamage: 3200, leanShare: 0.75, leanTier: 3, committedTier: 2 };
+/* How much "does well against these enemies" counts, by stage and item kind (v3.5). Measured on the backtest matches (75,000
+   players, 183,000 purchases, October 2026): how much each point of counter score went with winning more than the match
+   situation predicted (1 = exactly as much), for the items players bought, with its uncertainty:
+     stage   gun          spirit       survival
+     lane   -0.1 ± 0.9    2.3 ± 1.4    0.2 ± 1.2
+     mid     2.2 ± 1.4    1.8 ± 1.4    1.0 ± 1.3
+     late    2.3 ± 1.2    0.9 ± 1.1   -2.3 ± 1.2
+   Up to v3.4 every counter score counted fully. Survival items' counter scores went with winning less than they said (late:
+   the opposite), which is part of why green items led the buy order (Venator lane, October 18: Extra Stamina +2.0 and Bullet
+   Lifesteal +1.2 points from counters), and gun items' didn't help in lane either. Each weight is the measurement pulled toward 1
+   by its uncertainty (a prior of 1 ± 1), kept between 0 and 1: never more than before. */
+const CTR_KIND_W = { on: true, lane: { weapon: 0.42, spirit: 1, vitality: 0.65 }, mid: { weapon: 1, spirit: 1, vitality: 1 }, late: { weapon: 1, spirit: 0.96, vitality: 0 } };
 /* Switches for measuring each v3.4 part on the backtest: popularity among players of your build (buildPopularity), and the anchor
    choice (fitAnchorIds; off: your three most expensive items, as up to v3.3). */
 const BUILD_POP = { on: true };
@@ -1009,11 +1030,17 @@ function soulsNow() { return Math.max(0, Number($("souls").value) || 0); }
 /* Every request gives up after 30 s, so a stalled connection fails (and is retried) instead of leaving
    something "loading" forever. */
 const REQUEST_TIMEOUT_MS = 30000;   // generous: a heavy statistics query can be slow when the server's cache is cold
+/* An optional personal key for the data service (v3.5). Without one, everyone shares one allowance of new match connections, which
+   another app used up every hour from October 16, 2026 (the service's developer, October 19); keys have their own. Kept in this
+   browser only: never in match records, feedback, exports or the settings carried to the web version. A key is a UUID, with or
+   without the service's "HEXE-" prefix. */
+function apiKey() { const k = String(store.get("apiKey") || "").trim(); return /^(HEXE-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k) ? k : ""; }
+function apiInit(init = {}) { const k = apiKey(); return k ? { ...init, headers: { ...(init.headers || {}), "X-API-Key": k } } : init; }
 async function getJSON(path) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(API + path, { signal: ctrl.signal });
+    const res = await fetch(API + path, apiInit({ signal: ctrl.signal }));
     if (!res.ok) throw Object.assign(new Error(`The data service answered with code ${res.status} for ${path.split("?")[0]}`), { status: res.status });
     return await res.json();
   } catch (e) {
@@ -1137,6 +1164,11 @@ function spectateFailure(status, body = "") {
       const span = period ? (period >= 3600 ? `${Math.round(period / 3600)} hour` : `${Math.round(period / 60)} minutes`) : null;
       return { reason: "limit-global", short: "The data service is at its limit for all users", retry: false, ...info,
         text: `The data service has a limit for all its users together${limit && span ? ` (${limit} new matches every ${span})` : ""}, and it's reached right now. That isn't about your connections.` + when };
+    }
+    if (/^key$/i.test(type)) {
+      const span = period ? (period >= 3600 ? `${Math.round(period / 3600)} hour` : `${Math.round(period / 60)} minutes`) : null;
+      return { reason: "limit-key", short: "Your data service key's limit is reached", retry: false, ...info,
+        text: `Your data service key's limit${limit && span ? ` (${limit} new matches every ${span})` : ""} is reached.` + when };
     }
     const n = limit || SPECTATE_PER_HOUR;
     return { reason: "limit", short: "This hour's match connections are used up", retry: false, ...info,
@@ -1491,9 +1523,15 @@ function buildIdentity(ownedItems) {
   const sp = { weapon: 0, spirit: 0, vitality: 0 };
   for (const it of ownedItems) if (it && sp[it.item_slot_type] != null) sp[it.item_slot_type] += it.cost || 0;
   const dmg = sp.weapon + sp.spirit, share = dmg ? sp.weapon / dmg : 0.5;
-  const kind = dmg < BUILD_ID.minDamage ? "developing" : share >= BUILD_ID.committed ? "gun" : share <= 1 - BUILD_ID.committed ? "spirit" : "hybrid";
+  /* v3.5: a clear lean is read earlier (Moppy's gun McGinnis, October 18: read only at about 9 minutes, at 6,000 souls). From
+     leanDamage souls with at least leanShare of them in one kind, the build counts as that kind, "leaning": its big items of the
+     other kind (Tier 3 and up) need a reason. Once committed (minDamage souls, "committed" share), from Tier committedTier up. */
+  const lean = dmg >= BUILD_ID.leanDamage && dmg < BUILD_ID.minDamage && (share >= BUILD_ID.leanShare || share <= 1 - BUILD_ID.leanShare);
+  const kind = lean ? (share >= BUILD_ID.leanShare ? "gun" : "spirit")
+    : dmg < BUILD_ID.minDamage ? "developing" : share >= BUILD_ID.committed ? "gun" : share <= 1 - BUILD_ID.committed ? "spirit" : "hybrid";
   const main = kind === "gun" ? "weapon" : kind === "spirit" ? "spirit" : null;
-  return { kind, ...sp, damage: dmg, gunShare: share, main, off: main === "weapon" ? "spirit" : main === "spirit" ? "weapon" : null };
+  return { kind, leaning: lean, ...sp, damage: dmg, gunShare: share, main, off: main === "weapon" ? "spirit" : main === "spirit" ? "weapon" : null,
+    offTier: lean ? BUILD_ID.leanTier : BUILD_ID.committedTier };
 }
 /* Your hero's usual share of souls in each kind by each stage (v3.4), from its purchase statistics (fl, per stage column): every
    purchase counted at its price, adding up the stages so far (what players hold by then). [{ weapon, spirit, vitality }] per column. */
@@ -1637,6 +1675,7 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
       num += weight * lift; den += (weight * se) ** 2;
       if (z > best) best = z;
     }
+    if (CTR_KIND_W.on) score *= CTR_KIND_W[phase]?.[it.item_slot_type] ?? 1;   // v3.5: as much as counters of this kind predicted winning
     // One test across the whole enemy team, so 6 chances to look good by luck don't count as evidence.
     const counterZ = den ? num / Math.sqrt(den) : 0;
     const fits = (fit[it.id] || []).filter(f => owned.has(f.anchorId));
@@ -1856,12 +1895,43 @@ function offBuildReason(s) {
   if ((s.catZ || 0) >= WEAK_Z && (s.catFit || 0) > 0.002) return "kind";
   return null;
 }
+/* A second item for a job you've already covered (see overlapOf) needs a reason in this match (v3.5): a convincing counter, or what
+   the match needs even after counting the item you own (mechScore already gives only OWN_LEFT of it). Moppy's McGinnis (October
+   18): Unstoppable stayed a standard pick after Indomitable (both free you from stuns and silences), worth +0.3 points all told. */
+const OVERLAP_REASON = { on: true };
+/* A calmer first step during a live match (v3.5). In Moppy's October 18 matches the first item changed about once a minute
+   without a purchase: 43% of those changes came within 15 s of the previous one, and 21% went back within a minute (an
+   enemy's shop visit adds items one by one, your own purchase's data arrives in two steps, souls and net worth drift). So a
+   new first step shows once it has stayed first for SETTLE.ms, except at once when: you bought or sold something; the shown
+   step can't be planned any more (owned, skipped, or no reason left); or the new one answers something new in the match (a
+   counter that wasn't in the shown top 4, or what the match needs grew by SETTLE.urgent). On the recorded matches, 10 s cuts
+   the shown first-step changes by about a third. Never used for changes you make by hand (only during a live match).
+   st: { order, ownedSig, pending: { id, since } } (the shown plan) or null. Returns { keep, pending, why }. */
+const SETTLE = { on: true, ms: 10000, urgent: 0.005 };
+function settleFirst(st, order, { now, ownedSig, scoredById, skipped = new Set(), owned = new Set() }) {
+  const nf = order[0]?.s.item.id, sf = st?.order?.[0]?.s.item.id;
+  if (!SETTLE.on || !st || sf == null || nf == null || nf === sf) return { keep: false, pending: null, why: "same" };
+  if (st.ownedSig !== ownedSig) return { keep: false, pending: null, why: "your items changed" };
+  const shownNow = scoredById.get(sf);
+  if (!shownNow || owned.has(sf) || skipped.has(sf) || lacksReason(shownNow)) return { keep: false, pending: null, why: "shown step no longer valid" };
+  const newS = order[0].s, wasTop = st.order.slice(0, 4).some(x => x.s.item.id === nf);
+  if ((order[0].kind === "counter" && !wasTop) || (newS.mechScore || 0) - (shownNow.mechScore || 0) >= SETTLE.urgent) return { keep: false, pending: null, why: "new answer to the match" };
+  const pending = st.pending?.id === nf ? st.pending : { id: nf, since: now };
+  if (now - pending.since >= SETTLE.ms) return { keep: false, pending: null, why: "stayed first" };
+  return { keep: true, pending, why: "settling" };
+}
+function overlapReason(s) {
+  if (((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z) && (s.score || 0) > 0) return "counter";
+  if ((s.mechScore || 0) > 0.005) return "needs";
+  return null;
+}
 /* Out of its stage with nothing that makes it worth it in this match: no strong counter or build-fit evidence and
    nothing the live match needs. Such items aren't planned on their own (only as the first step toward an upgrade
    the plan wants), because a cheap item bought late takes a slot and souls from what you'll really need. */
 function lacksReason(s) {
   if (s.amp?.none) return true;   // nothing to amplify: never planned on its own (v2.8.3)
   if (s.offBuild && !s.offBuild.reason) return true;   // a big item outside your committed build, with no reason in this match (v3.4)
+  if (OVERLAP_REASON.on && s.overlap && !overlapReason(s)) return true;   // the same job as an item you own, with no reason for a second (v3.5)
   if (!s.timing?.outOfStage) return false;
   const strongCtr = ((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z) && (s.score || 0) > 0;
   const strongFit = (s.fitZ || 0) >= STRONG_Z && (s.fitScore || 0) > 0;
@@ -1927,7 +1997,7 @@ function groupRecs(scored) {
   // Standard picks: best value at this stage (net-worth adjusted), popularity only breaks ties. Skips items
   // that clearly clash with what you own, and items whose time has passed.
   // v3.4: nor a big item outside your committed build without a reason (the standard picks are your build's).
-  const core = scored.filter(s => !used.has(s.item.id) && !(s.fits || []).some(f => f.src !== "pair" && f.z <= -STRONG_Z) && !(s.mechScore < 0) && !(s.timing?.factor < 0.4) && !s.timing?.outOfStage && !(s.offBuild && !s.offBuild.reason))
+  const core = scored.filter(s => !used.has(s.item.id) && !(s.fits || []).some(f => f.src !== "pair" && f.z <= -STRONG_Z) && !(s.mechScore < 0) && !(s.timing?.factor < 0.4) && !s.timing?.outOfStage && !(s.offBuild && !s.offBuild.reason) && !(OVERLAP_REASON.on && s.overlap && !overlapReason(s)))
     .sort((a, b) => (val(b) - val(a)) || (b.pop - a.pop)).slice(0, 8);
   return { counters: strong.slice(0, 10), build, situational: weak, core };
 }
@@ -2893,7 +2963,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     match = { P, needs, fed, live, enemyItemCount: [...enemyItems.values()].reduce((a, l) => a + l.length, 0) };
   }
   // Big items outside a committed build need a reason in this match (v3.4); after the match-aware layer, which is one of the reasons.
-  for (const s of merged) s.offBuild = identity.off && s.item.item_slot_type === identity.off && (s.item.item_tier || 0) >= BUILD_ID.bigTier ? { kind: identity.kind, reason: offBuildReason(s) } : null;
+  for (const s of merged) s.offBuild = identity.off && s.item.item_slot_type === identity.off && (s.item.item_tier || 0) >= (identity.offTier ?? BUILD_ID.bigTier) ? { kind: identity.kind, reason: offBuildReason(s) } : null;
   const scoredById = new Map(merged.map(s => [s.item.id, s]));
   // Items you've said you don't want are left out of every list and the plan for this match (still shown in details).
   for (const s of merged) s.skipped = skipped.has(s.item.id);
@@ -3306,9 +3376,10 @@ const KIND_WORD = { weapon: "gun", spirit: "spirit", vitality: "survival" };
 function buildKindText(id) {
   const n = x => x.toLocaleString();
   const parts = `${id.weapon ? n(id.weapon) : "none"} in gun items, ${id.spirit ? n(id.spirit) : "none"} in spirit`;
-  if (id.kind === "developing") return id.damage ? `Build: still developing (${parts}). The tool reads your direction once about ${n(BUILD_ID.minDamage)} souls are in gun and spirit items.` : "";
+  if (id.kind === "developing") return id.damage ? `Build: still developing (${parts}). The tool reads your direction from about ${n(BUILD_ID.leanDamage)} souls in gun and spirit items, once most of them are one kind.` : "";
   if (id.kind === "hybrid") return `Build: hybrid (${parts}).`;
-  return `Build: ${id.kind} (${parts}). Big ${KIND_WORD[id.off]} items are suggested only when something in this match calls for them.`;
+  if (id.leaning) return `Build: leaning ${id.kind} (${parts}). Big ${KIND_WORD[id.off]} items (Tier ${id.offTier} and up) are suggested only when something in this match calls for them.`;
+  return `Build: ${id.kind} (${parts}). ${KIND_WORD[id.off][0].toUpperCase() + KIND_WORD[id.off].slice(1)} items from Tier ${id.offTier} up are suggested only when something in this match calls for them.`;
 }
 function renderBuildKind() {
   const box = $("buildKind"); if (!box) return;
@@ -4606,7 +4677,7 @@ async function listedBroadcast(id) {
   const ctrl = typeof AbortController === "function" ? new AbortController() : null;
   const t = ctrl ? setTimeout(() => ctrl.abort(), LISTED_TIMEOUT_MS) : null;
   try {
-    const res = await fetch(`${API}/v1/matches/live/urls`, ctrl ? { signal: ctrl.signal } : undefined);
+    const res = await fetch(`${API}/v1/matches/live/urls`, apiInit(ctrl ? { signal: ctrl.signal } : {}));
     if (!res.ok) return null;
     const list = await res.json();
     const hit = Array.isArray(list) ? list.find(x => x && String(x.match_id) === String(id) && typeof x.broadcast_url === "string" && x.broadcast_url) : null;
@@ -4621,7 +4692,7 @@ const LISTED_TIMEOUT_MS = 6000;
 function resetMatchState() {
   logClose("another match");
   S.enemies = []; S.lane = new Set(); S.owned = new Set(); S.clockStart = null; S.clockStartedOnce = false; S.soulOffset = 0;
-  S.clockAdjust = 0; S.lastSouls = null; S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = [];
+  S.clockAdjust = 0; S.lastSouls = null; S.prevOrder = []; S.settle = null; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = [];
   S.soulsRef = null; S.selected = null; S.tab = null; S.pending = []; S.windowFrom = null; S.handEnemies = false;
   S.frozen = null; S.endedMatchId = null; S.overHidden = null; S.rankWiden = 0; S.floatSince = null; S.partSeenAt = {}; S.fullOpen = null; S.mePick = S.mePick && String(S.mePick.matchId) === String(LIVE.id) ? S.mePick : null;
   if ($("moSaved")) $("moSaved").textContent = "";   // v3.2.1: nothing of the last match's end carries over
@@ -4650,10 +4721,44 @@ function scheduleLinkRetry(id, opts) {
     $("matchId").value = id; linkMatch({ id, active: opts.active, auto: true });
   }, LINK_RETRY.s * 1000);
 }
+/* While a new connection is held by a limit (v3.5). Up to v3.4 the tool waited for you to press Connect again, and in Moppy's
+   October 18-19 matches the shared limit for all users was reached most of the time. Now, at no cost: every HELD_WATCH.everyS
+   seconds it checks the data service's list of matches it's already watching (free, see listedBroadcast) and connects the moment
+   yours is there; and when the limit frees up it tries once by itself, never with your last 2 connections of the hour and at
+   most LINK_RETRY.max automatic tries per match (each refused try counts against your 6 an hour). It stops after maxMin minutes
+   and says so. { id, started, checks, timer }. */
+const HELD_WATCH = { everyS: 20, maxMin: 15 };
+const HELD_WATCH_TEXT = " Meanwhile the tool checks every 20 s whether the data service has started watching your match (free) and connects by itself, and tries once more by itself when the limit frees up. Or fill in your teams by hand (Setup).";
+let heldWatch = null;
+function cancelHeldWatch() { if (heldWatch) { clearInterval(heldWatch.timer); heldWatch = null; } }
+function startHeldWatch(id, opts) {
+  cancelHeldWatch();
+  const w = heldWatch = { id, started: Date.now(), checks: 0, busy: false };
+  LIVE.heldWatch = { started: w.started, checks: 0, how: null };
+  const tick = async () => {
+    if (heldWatch !== w || w.busy || linkStarting || (LIVE.id && LIVE.url)) return;
+    if (Date.now() - w.started > HELD_WATCH.maxMin * 60000) {
+      cancelHeldWatch(); LIVE.heldWatch.how = "gave up";
+      liveStatus(`No connection became free in ${HELD_WATCH.maxMin} minutes, so the tool has stopped checking. Press Connect to try again, or fill in your teams by hand (Setup).`, "warn");
+      return;
+    }
+    w.busy = true; w.checks++; LIVE.heldWatch.checks = w.checks;
+    try {
+      const go = how => { cancelHeldWatch(); LIVE.heldWatch.how = how; linkMatch({ id, active: opts.active, auto: true }); };
+      if (await listedBroadcast(id)) { if (heldWatch === w) go("listed"); return; }
+      if (heldWatch !== w || spectateHold()) return;
+      const left = SPECTATE_PER_HOUR - spectatesUsed(), tries = linkRetry?.id === id ? linkRetry.n : 0;
+      if ((left >= 2 || apiKey()) && tries < LINK_RETRY.max) { linkRetry = { id, n: tries + 1, at: null, timer: null }; go("retry"); }
+      else { cancelHeldWatch(); LIVE.heldWatch.how = "left to you"; liveStatus(`A new connection is free again. Press Connect to use it (${Math.max(0, left)} of ${SPECTATE_PER_HOUR} left this hour).`, "warn"); }
+    } finally { w.busy = false; }
+  };
+  w.timer = setInterval(tick, HELD_WATCH.everyS * 1000);
+}
 async function linkMatch(opts = {}) {
   const id = opts.id || ($("matchId").value.match(/\d+/g) || []).join("");
   if (linkStarting === id) return;
   cancelLinkRetry();
+  if (heldWatch && (heldWatch.id !== id || !opts.auto)) cancelHeldWatch();
   LIVE.matchErr = null;
   if (id.length < 5) {
     LIVE.matchErr = { state: "warn", text: "No match ID typed yet." };
@@ -4709,9 +4814,10 @@ async function linkSteps(id, opts) {
         const at = new Date(hold.until).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
         tlMark("held: limit");
         throw Object.assign(new Error((hold.type === "Global" ? "The data service is at its limit for all users right now, and your match isn't one it's already watching."
+          : hold.type === "Key" ? "Your data service key's limit is reached, and your match isn't one the data service is already watching."
           : "This hour's match connections are used up, and your match isn't one the data service is already watching.")
-          + ` The next connection frees up at about ${at}. The tool won't ask before then, because a refused try counts too and would push that later. Meanwhile, fill in your teams by hand (Setup) if you like.`),
-          { short: hold.type === "Global" ? "The data service is at its limit for all users" : "This hour's match connections are used up", temporary: true, held: true });
+          + ` The next connection frees up at about ${at}. The tool won't ask before then, because a refused try counts too and would push that later.` + HELD_WATCH_TEXT),
+          { short: hold.type === "Global" ? "The data service is at its limit for all users" : hold.type === "Key" ? "Your key's limit is reached" : "This hour's match connections are used up", temporary: true, held: true, watch: true });
       }
       const block = serviceBlock();
       if (block) {
@@ -4726,13 +4832,13 @@ async function linkSteps(id, opts) {
         LIVE.tryAnyway = null;
       }
       const log = spectateLog();
-      if (log.length >= SPECTATE_PER_HOUR) {
+      if (log.length >= SPECTATE_PER_HOUR && !apiKey()) {   // with a key, the 6 an hour per connection doesn't apply (v3.5)
         const mins = Math.max(1, Math.ceil((log[0] + 3600000 - Date.now()) / 60000));
         throw new Error(`All ${SPECTATE_PER_HOUR} match connections for this hour are used (counted on this computer). One frees up in about ${mins} min.`);
       }
       store.set("spectates", [...log, Date.now()]);
       let res;
-      try { res = await fetch(`${API}/v1/matches/${id}/live/url`); }
+      try { res = await fetch(`${API}/v1/matches/${id}/live/url`, apiInit()); }
       catch { if (stale()) return; throw new Error("Couldn't reach the data service. Check your internet connection, then press Connect."); }
       if (stale()) return;
       if (!res.ok) {
@@ -4740,7 +4846,7 @@ async function linkSteps(id, opts) {
         if (stale()) return;
         const fail = spectateFailure(res.status, body);
         if (SERVICE_WIDE.has(fail.reason)) store.set("svcBlock", { at: Date.now(), reason: fail.reason, short: fail.short, text: fail.text });
-        if (res.status === 429) store.set("spectateHold", { until: Date.now() + 1000 * (fail.wait || 300), type: fail.type === "Global" || fail.reason === "limit-global" ? "Global" : "IP" });
+        if (res.status === 429) store.set("spectateHold", { until: Date.now() + 1000 * (fail.wait || 300), type: fail.reason === "limit-global" ? "Global" : fail.reason === "limit-key" ? "Key" : "IP" });
         const left = Math.max(0, SPECTATE_PER_HOUR - spectatesUsed());
         // A temporary refusal is tried once more by itself after a pause (at most LINK_RETRY.max times per match, and
         // never with the last connection of the hour). Pressing Connect still tries straight away.
@@ -4749,11 +4855,11 @@ async function linkSteps(id, opts) {
         const at = new Date(Date.now() + LINK_RETRY.s * 1000).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
         const next = auto ? ` The tool will try again by itself at about ${at} (that uses one of your ${left} connections left this hour), or press Connect to try now.`
           : fail.retry ? ` Wait a minute or two, then press Connect. (Each try uses a connection: ${left} of ${SPECTATE_PER_HOUR} left this hour.)`
-          : fail.reason === "limit" ? "" : ` (${left} of ${SPECTATE_PER_HOUR} match connections left this hour.)`;
+          : res.status === 429 ? HELD_WATCH_TEXT : ` (${left} of ${SPECTATE_PER_HOUR} match connections left this hour.)`;
         LIVE.spectateFails = [...(LIVE.spectateFails || []), { at: Date.now(), status: res.status, reason: fail.reason, auto,
           ...(res.status === 429 ? { type: fail.type, limit: fail.limit, period: fail.period, requests: fail.requests, wait: fail.wait } : {}) }].slice(-6);
         tlMark("refused: " + fail.reason);
-        throw Object.assign(new Error(fail.text + next), { short: fail.short, temporary: fail.retry, auto });
+        throw Object.assign(new Error(fail.text + next), { short: fail.short, temporary: fail.retry || res.status === 429, auto, watch: res.status === 429 });
       }
       const url = (await res.json()).broadcast_url;
       if (stale()) return;
@@ -4777,17 +4883,19 @@ async function linkSteps(id, opts) {
     if (LIVE.applied) { liveStatus(text, "warn"); }        // teams from the Watch list stay; only live updates are off
     else { LIVE.id = null; S.matchId = null; LIVE.matchErr = { state: cls, text: e.short ? e.short + "." : text }; liveStatus(text, cls); saveMatch(); }
     if (e.auto) scheduleLinkRetry(id, opts);
+    else if (e.watch) startHeldWatch(id, opts);
   }
   renderLive(); renderSources();
 }
 
 function unlinkMatch(quiet) {
   linkSeq++;   // any link still starting is now stale
+  if (!quiet) cancelHeldWatch();
   for (const k in LIVE.streams) LIVE.streams[k].stop();
   Object.assign(LIVE, { streams: {}, deathReplay: null, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
     itemsOk: false, itemsChecked: false, idSeen: 0, idKnown: 0, idSamples: [], knownSet: null, rawItemSample: "", rawSoulsSample: "", soulsRows: 0, invSig: "", souls: null, nw: null, meHow: null,
     thinRejected: null, laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
-    connecting: false, urlVia: null, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, ownLivePrev: null, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0 });
+    connecting: false, urlVia: null, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, ownLivePrev: null, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0, neverStarted: false, settleHeld: 0 });
   clearTimeout(LIVE.soulsCheck);
   S.matchId = null;
   renderSources();
@@ -4856,7 +4964,7 @@ function newMatch() {
   S.me = null; store.set("me", null);
   S.enemies = []; S.lane = new Set(); S.owned = new Set(); S.clockStart = null; S.clockStartedOnce = false; S.soulOffset = 0; S.lastSouls = null;
   $("buildSearch").value = ""; renderBuildSearch();
-  S.prevOrder = []; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = []; S.soulsRef = null; S.selected = null; S.tab = null; S.view = null; S.cache = {}; S.pending = []; S.windowFrom = null;
+  S.prevOrder = []; S.settle = null; S.dropped = []; S.sold = []; S.markedAt = {}; S.removedAt = {}; S.boughtAt = {}; S.boughtInfo = {}; S.lastOwned = null; S.lastPV = null; S.flexManual = 0; S.skipped = {}; S.deaths = []; S.soulsRef = null; S.selected = null; S.tab = null; S.view = null; S.cache = {}; S.pending = []; S.windowFrom = null;
   unlinkMatch(true); cancelLinkRetry(); $("matchId").value = ""; liveDiag(""); liveStatus("Cleared for a new match. Press Find my match once you're in the game, or set things up by hand.");
   $("souls").value = 0; setPhase("lane");
   // Your rank and period choices stay (v2.7.4): they're picked before finding a match, not per match.
@@ -5062,7 +5170,7 @@ function liveStream(name, sql, onRow, onReject) {
     dog = setInterval(() => { if (stopped) { clearInterval(dog); return; } if (Date.now() - lastByteAt > LIVE_QUIET.ms) { clearInterval(dog); const c = ctrl; ctrl = null; c?.abort(); info.quietDrops = (info.quietDrops || 0) + 1; retry("The live stream went silent."); } }, 5000);
     const q = new URLSearchParams({ broadcast_url: LIVE.url, query: sql });
     let res;
-    try { res = await fetch(`${API}/v1/matches/demo/live/query?${q}`, { signal: ctrl.signal, headers: { Accept: "text/event-stream" } }); }
+    try { res = await fetch(`${API}/v1/matches/demo/live/query?${q}`, apiInit({ signal: ctrl.signal, headers: { Accept: "text/event-stream" } })); }
     catch (e) { if (!stopped && e.name !== "AbortError") retry("Couldn't reach the data service."); return; }
     if (res.ok) { connAt = Date.now(); statusAt = 0; connRows = 0; }
     if (!res.ok) {
@@ -5112,6 +5220,15 @@ function liveStream(name, sql, onRow, onReject) {
                v3.3 Valve's "404 Not Found" after a match ended matched "not found" below, so the end of Moppy's McGinnis match showed
                "didn't accept the tool's request", and the lighter player query was switched off for the rest of the session. */
             const relay = st === 502 || /live broadcast error/i.test(msg);
+            /* Valve's relay never started this match's broadcast (v3.5): the data service says so after a minute of "Broadcast has
+               not started yet" (its change of October 19: this happens for some matches, and spectating again returns the same
+               broadcast). Up to v3.4 that was retried 6 times, about 10 minutes, then "Lost the live connection". Now every
+               stream stops at once and says why; pressing Connect again is free (same match) if you want to check later. */
+            if (/never started/i.test(msg)) {
+              stopped = true; info.problem = "never started"; LIVE.neverStarted = true;
+              if (roster) { tlMark("never started"); say("Valve never started the broadcast for this match, so live data isn't available for it. This happens for some matches on Valve's side, and connecting again gets the same broadcast, so the tool has stopped trying. Fill in your teams by hand (Setup), or press Connect later to check again (free for the same match).", "error", "error"); }
+              return;
+            }
             if (!relay && (st === 400 || /invalid query|planning|not found|parse error/i.test(msg)))
               return fatal("The live data service didn't accept the tool's request. Open \"Technical details\" below if you want to report it.", msg.slice(0, 400));
             if (relay) {
@@ -5498,6 +5615,10 @@ function logDiag() {
     d.spectateFails = LIVE.spectateFails?.length ? LIVE.spectateFails.map(f => ({ status: f.status, reason: f.reason, auto: f.auto,
       ...(f.type !== undefined ? { type: f.type, limit: f.limit, period: f.period, requests: f.requests, wait: f.wait } : {}) })) : null;
     d.urlVia = LIVE.urlVia || null;
+    d.heldWatch = LIVE.heldWatch || null;   // v3.5: waiting out a limit (checks of the free list, and how it ended)
+    d.neverStarted = !!LIVE.neverStarted;
+    d.withKey = !!apiKey();   // whether a personal data service key was used (never the key itself)
+    d.settleHeld = LIVE.settleHeld || 0;   // v3.5: recalculations where a new first step was still settling
     d.heroesFromMatch = S.heroesAdded?.length ? S.heroesAdded : null;   // heroes the game data didn't list yet (v2.8.1)
     d.schemaSummary = String(store.get("liveCols")?.summary || "").split("\n").filter(l => /^(Controller|Pawn) columns/.test(l)).join("\n").slice(0, 3000);   // column names only
     // Why the skill bracket is what it is (no account numbers): a saved Steam account, your rank, the lobby lookup.
@@ -6681,11 +6802,21 @@ function renderResultsInner() {
   for (const id of Object.keys(S.boughtInfo)) if (!S.owned.has(Number(id))) delete S.boughtInfo[id];
   const bought = {};
   for (const id of S.owned) bought[id] = S.boughtInfo[id] || { sec: S.boughtAt?.[id] ?? null, rate: null };
-  const { order, groups, scoredById, match, ownedRates, ownedInfo, purchaseValues, identity } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
+  const { order: planned, groups, scoredById, match, ownedRates, ownedInfo, purchaseValues, identity } = computePlan({ ready, items: S.items, itemById: S.itemById, itemByClass: S.itemByClass,
     prog: S.prog, owned: S.owned, souls, lane: S.lane, threatW, fed, fl, sec, curve: S.curve, slotCap: slotsNow.cap, skipped, prevOrder: S.prevOrder,
     roster: LIVE.id && LIVE.itemsOk ? LIVE.roster : null, me: S.me, heroName, abilities: heroAbilities(S.me), bought, ...kitsNow(),
     stageAt: ph => { const e = S.cache[dataKey(ph)]; return e && e.ready ? { entry: e, all: allRanksNow(ph) } : null; } });   // statistics already loaded, never a new request
   if (!prelim) { S.lastPV = purchaseValues; S.lastOwned = new Set(S.owned); }
+  // A calmer first step during a live match (v3.5, see settleFirst): the shown plan stays while a new first step settles.
+  const ownedSig = [...S.owned].sort((a, b) => a - b).join(",");
+  let order = planned;
+  if (LIVE.id && LIVE.applied && !prelim) {
+    const d = settleFirst(S.settle, planned, { now: Date.now(), ownedSig, scoredById, skipped, owned: S.owned });
+    if (d.keep) {
+      order = S.settle.order; S.settle.pending = d.pending; LIVE.settleHeld = (LIVE.settleHeld || 0) + 1;
+      clearTimeout(S.settleTimer); S.settleTimer = setTimeout(renderResults, Math.max(50, d.pending.since + SETTLE.ms - Date.now() + 50));
+    } else S.settle = { order: planned, ownedSig, pending: null };
+  } else S.settle = { order: planned, ownedSig, pending: null };
 
   // Possible unmarked purchases (see checkSoulsDrop); drop the ones that are owned or were just sold.
   const now = Date.now();
@@ -7299,6 +7430,20 @@ $("go").onclick = recommend;
 $("buildSearch").oninput = renderBuildSearch;
 $("buildSearch").onkeydown = e => { if (e.key === "Escape") { $("buildSearch").value = ""; renderBuildSearch(); } };
 $("linkMatch").onclick = () => linkMatch();
+/* The optional data service key (v3.5, see apiKey). */
+function renderApiKey() {
+  const k = apiKey(); $("apiKeyInput").value = "";
+  $("apiKeyInput").placeholder = k ? "Key saved (type a new one to replace it, or leave empty and press Save to remove it)" : "Deadlock API key (optional)";
+  $("apiKeyNote").textContent = k ? "Saved in this browser only." : "";
+}
+$("apiKeySave").onclick = () => {
+  const v = $("apiKeyInput").value.trim();
+  if (!v) { store.set("apiKey", null); renderApiKey(); $("apiKeyNote").textContent = "Key removed."; return; }
+  store.set("apiKey", v);
+  if (!apiKey()) { store.set("apiKey", null); renderApiKey(); $("apiKeyNote").textContent = "That doesn't look like a data service key (a long code of letters, numbers and dashes)."; return; }
+  renderApiKey();
+};
+renderApiKey();
 $("findMatch").onclick = findMyMatch;
 /* The Match over card (v3.2) */
 $("moReview").onclick = () => openReview(String(S.endedMatchId || S.lastMatchId || ""));
