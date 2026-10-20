@@ -110,6 +110,9 @@
   .updnote.new { color: var(--bad); font-weight: 600; }
   .slotline label { font-weight: 400; font-size: inherit; } .slotline select { font-size: 12.5px; padding: 1px 4px; }
   .buildkind { margin: 2px 0 0; }
+  table.ledger { border-collapse: collapse; margin: 4px 0; } table.ledger caption { text-align: left; font-weight: 600; padding-bottom: 2px; }
+  table.ledger td { padding: 1px 10px 1px 0; } table.ledger td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  table.ledger tr.total td { border-top: 1px solid var(--line); font-weight: 600; }
   .eggnote { border-left: 3px solid var(--accent); padding: 2px 0 2px 8px; }
   .eggnote[data-action="hatch"] { border-color: var(--good); font-weight: 600; }
   .deadnote { border-left: 3px solid var(--good); padding: 2px 0 2px 8px; font-weight: 600; }
@@ -425,7 +428,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.5.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.6</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -718,10 +721,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.5.1";   // shown in the top bar and written into match records
+const VERSION = "v3.6";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.6", date: "October 19, 2026", items: [
+    "Item details › Show the full numbers now starts with a score breakdown: each part of an item's score (its value at this stage, against this enemy team, fit with your items, what the match needs, and so on) and the total, with what changed a part in words.",
+    "Behind the scenes: a quality report saved with every release, and checks on all saved matches. Recommendations are unchanged."] },
   { v: "v3.5.1", date: "October 19, 2026", items: [
     "Live Match uses one connection fewer per match: a listener for death summaries, which never received anything in a real match, is gone.",
     "Behind the scenes: unused code removed and the roadmap shortened to one page. Recommendations are unchanged."] },
@@ -860,9 +866,12 @@ const PATCH_NOTES = [
     "Recommendations no longer favour rarely bought or out-of-stage items without a good reason.",
     "\"Not for me\" (✕) removes an item from the suggestions for the rest of the match."] }
 ];
-const PHASES = { lane: [0, 540], mid: [540, 1200], late: [1200, null] };
+/* Stage boundaries, in seconds of game time (v3.6: one source; up to v3.5 these numbers were typed in each place): the mid game
+   from 9:00, the late game from 20:00, and the statistics' last column from 30:00. */
+const STAGE_S = { mid: 540, late: 1200, late2: 1800 };
+const PHASES = { lane: [0, STAGE_S.mid], mid: [STAGE_S.mid, STAGE_S.late], late: [STAGE_S.late, null] };
 const PHASE_NAMES = { lane: "Laning", mid: "Mid game", late: "Late game" };
-const BOUNDARIES = [[540, "lane", "mid"], [1200, "mid", "late"]];
+const BOUNDARIES = [[STAGE_S.mid, "lane", "mid"], [STAGE_S.late, "mid", "late"]];
 const BLEND_S = 90;          // stages blend over 90 s either side of 9:00 and 20:00
 const MIN_GAMES = 40;        // ignore rows with fewer games than this
 const STRONG_Z = 1.65;       // about 90% one-sided confidence
@@ -907,8 +916,6 @@ const PAIR_FIT = { on: false, w: 0.5 };
    11% more often, while the purchase memory alone already removed almost all "sell what you just bought" moments (45 -> 5).
    Too big a change before v2.9's backtest can judge it. Replays and tests can switch it on. */
 const STAGE_AT_PURCHASE = { on: false };
-/* An owned item's counters from the stage it was bought in (v3.0.2, computePlan), as its stage value already is. */
-const OWN_CTR_AT_PURCHASE = { on: true };
 /* Calibration weights from the v2.9 backtest (roadmap, v2.9): how much each part of an item's value really predicts winning.
    Measured on 6,979 players in 7,000 real matches (8 heroes, two rank brackets, October 8 to 15) with statistics from the 30
    days before them, so no match was judged by numbers that included its own result: the chance of winning after buying an
@@ -971,10 +978,6 @@ const BUILD_ID = { minDamage: 6000, committed: 0.7, bigTier: 3, leanDamage: 3200
    Lifesteal +1.2 points from counters), and gun items' didn't help in lane either. Each weight is the measurement pulled toward 1
    by its uncertainty (a prior of 1 ± 1), kept between 0 and 1: never more than before. */
 const CTR_KIND_W = { on: true, lane: { weapon: 0.42, spirit: 1, vitality: 0.65 }, mid: { weapon: 1, spirit: 1, vitality: 1 }, late: { weapon: 1, spirit: 0.96, vitality: 0 } };
-/* Switches for measuring each v3.4 part on the backtest: popularity among players of your build (buildPopularity), and the anchor
-   choice (fitAnchorIds; off: your three most expensive items, as up to v3.3). */
-const BUILD_POP = { on: true };
-const FIT_ANCHORS = { v34: true };
 const POP_PRIOR = 0.002;     // popularity at this stage: weak evidence (at most +0.2 pts), breaks near-ties
 const RARE_STAGE_SHARE = 0.25;   // bought at this stage by under a quarter of the usual share -> "rarely bought this late"
 /* Items your hero rarely buys need stronger evidence. Few buyers means noisier numbers, the players who pick an
@@ -1505,7 +1508,6 @@ function heroShareOf(baseline) {
    expensive items: Moppy's gun McGinnis (October 17) was compared with the players owning Capacitor, Vampiric Burst and Healing
    Tempo, mostly spirit and hybrid builds; Hollow Point and Burst Fire (4% and 7% of McGinnis players) describe a gun build. */
 function fitAnchorIds(ownedItems, n = 3, shareOf = () => 0) {
-  if (!FIT_ANCHORS.v34) return [...ownedItems].filter(Boolean).sort((a, b) => (b.cost || 0) - (a.cost || 0)).slice(0, n).map(i => i.id);
   const says = i => (i.cost || 0) * (1 - Math.min(1, Math.max(0, shareOf(i.id) || 0)));
   const byCost = [...ownedItems].filter(Boolean).sort((a, b) => says(b) - says(a) || (b.cost || 0) - (a.cost || 0) || a.id - b.id);
   const of = k => byCost.filter(i => i.item_slot_type === k);
@@ -1773,7 +1775,7 @@ function flowLifts(nodes, tierOf = () => null) {
   return { items, means, colShare, tierShare };
 }
 /* Which flow stage a game time falls in (the API's fixed boundaries). */
-function flowCol(sec) { return sec >= 1800 ? 3 : sec >= 1200 ? 2 : sec >= 540 ? 1 : 0; }
+function flowCol(sec) { return sec >= STAGE_S.late2 ? 3 : sec >= STAGE_S.late ? 2 : sec >= STAGE_S.mid ? 1 : 0; }
 
 /* Timing for one item at a game time: the data pattern across stages, and the mechanic. Items that build
    value the longer you own them (souls per minute, growing or permanent stacks; read from the item's own
@@ -1838,20 +1840,30 @@ const pts = x => (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(1);
 
 /* One value for every item, in win-rate points: its stage value (net-worth adjusted), how it does
    against this enemy team, how it fits your items, and what the live match needs. */
-function itemValue(s) {
+function itemValue(s) { return valueParts(s, true); }
+/* The value ledger (v3.6): the same value as named parts that add up exactly to it (itemValue is their sum, from this one
+   function, so the two can't disagree). sumOnly: just the sum (itemValue runs thousands of times per plan). Otherwise
+   { parts: { stage, counters, fit, needs, popularity, rarity, survival }, notes: [what changed a part, in words] }. */
+const LEDGER_PARTS = [["stage", "Value at this stage"], ["counters", "Against this enemy team"], ["fit", "Fit with your items"], ["needs", "What this match needs"],
+  ["popularity", "Popular at this stage"], ["rarity", "Rarely bought at this stage"], ["survival", "Survival items you already have"]];
+function valueParts(s, sumOnly = false) {
   let adj = s.adj || 0, ctr = s.score || 0, fit = FIT_W * (s.fitScore || 0) + CAT_FIT_W * (s.catFit || 0);   // signed and shrunk by their uncertainty (adj is weighted where it's set)
+  const notes = sumOnly ? null : [];
   // A healing amplifier with nothing to amplify (see ampSupport): its buyers' good results don't apply to you.
-  if (s.amp?.none) { if (adj > 0) adj = 0; if (ctr > 0) ctr = 0; if (fit > 0) fit = 0; }
+  if (s.amp?.none) { if (adj > 0) adj = 0; if (ctr > 0) ctr = 0; if (fit > 0) fit = 0; notes?.push("Nothing to amplify: its good numbers don't count for you"); }
   // Does the same job as an item you own (see overlapOf): only part of its favourable numbers apply to you.
-  if (s.overlap) { const f = s.overlap.factor; if (adj > 0) adj *= f; if (ctr > 0) ctr *= f; if (fit > 0) fit *= f; }
+  if (s.overlap) { const f = s.overlap.factor; if (adj > 0) adj *= f; if (ctr > 0) ctr *= f; if (fit > 0) fit *= f; notes?.push(`Same job as your ${s.overlap.with}: ${Math.round(f * 100)}% of its good numbers count`); }
   // Out of its stage: only a convincing, match-specific reason counts in its favour (a strong counter or build
   // fit, or what the live match needs); good general numbers count half, weak ones not at all.
   if (s.timing?.outOfStage) {
     if (adj > 0) adj *= 0.5;
     if (ctr > 0 && !((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z)) ctr = 0;
     if (fit > 0 && !((s.fitZ || 0) >= STRONG_Z)) fit = 0;
+    notes?.push("Out of its usual stage: its stage value counts half, and weak evidence doesn't count");
   }
-  return adj + ctr + fit + (s.mechScore || 0) + (s.popPrior ?? POP_PRIOR) * (s.popShare || 0) - (s.rarePenalty || 0) - (s.satPen || 0);
+  const needs = s.mechScore || 0, popularity = (s.popPrior ?? POP_PRIOR) * (s.popShare || 0), rarity = -(s.rarePenalty || 0), survival = -(s.satPen || 0);
+  const sum = adj + ctr + fit + needs + popularity + rarity + survival;
+  return sumOnly ? sum : { parts: { stage: adj, counters: ctr, fit, needs, popularity, rarity, survival }, notes, sum };
 }
 /* A reason in this match for a big item outside a committed build (v3.4, see BUILD_ID): a convincing counter, a convincing fit with
    your items (one item, or its whole kind), or what the live match needs. Returns its name, or null. */
@@ -2288,7 +2300,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
   return steps;
 }
 
-function phaseForSeconds(sec) { return sec >= 1200 ? "late" : sec >= 540 ? "mid" : "lane"; }
+function phaseForSeconds(sec) { return sec >= STAGE_S.late ? "late" : sec >= STAGE_S.mid ? "mid" : "lane"; }
 
 /* Average total souls (net worth) at a game time, read off the curve by straight-line steps. */
 function netWorthAt(curve, sec) {
@@ -2838,11 +2850,11 @@ const purchaseRate = s => { const g = statsValue(s); return Math.max(0.25 * g, g
 /* The late game's stage-value columns at a game time: 20-30 min, 30+ min, blended over BLEND_S either side of 30:00. */
 /* Stage-value columns at any game time, blended over BLEND_S either side of 9:00, 20:00 and 30:00 (as the stages are). */
 function flowColsAt(t) {
-  for (const [b, c] of [[540, 0], [1200, 1], [1800, 2]]) if (Math.abs(t - b) < BLEND_S) { const w = (t - (b - BLEND_S)) / (2 * BLEND_S); return [[c, 1 - w], [c + 1, w]]; }
+  for (const [b, c] of [[STAGE_S.mid, 0], [STAGE_S.late, 1], [STAGE_S.late2, 2]]) if (Math.abs(t - b) < BLEND_S) { const w = (t - (b - BLEND_S)) / (2 * BLEND_S); return [[c, 1 - w], [c + 1, w]]; }
   return [[flowCol(t), 1]];
 }
 function lateCols(sec) {
-  if (sec != null && Math.abs(sec - 1800) < BLEND_S) { const w = (sec - (1800 - BLEND_S)) / (2 * BLEND_S); return [[2, 1 - w], [3, w]]; }
+  if (sec != null && Math.abs(sec - STAGE_S.late2) < BLEND_S) { const w = (sec - (STAGE_S.late2 - BLEND_S)) / (2 * BLEND_S); return [[2, 1 - w], [3, w]]; }
   return [[Math.max(2, flowCol(sec ?? 0)), 1]];
 }
 const TAG_CACHE = new Map();
@@ -2872,7 +2884,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   // Without the adjusted values (flow data unavailable) popularity is the best remaining evidence, so it counts more.
   const popPrior = fl ? POP_PRIOR : POP_PRIOR * 4;
   // Popularity among players of your build too (v3.4, see buildPopularity): the larger of the two counts.
-  const bps = BUILD_POP.on ? ready.map(p => ({ w: p.w / wsum, m: buildPopularity(p.entry.fit?.perAnchor, owned) })).filter(x => x.m) : [];
+  const bps = ready.map(p => ({ w: p.w / wsum, m: buildPopularity(p.entry.fit?.perAnchor, owned) })).filter(x => x.m);
   const bw = bps.reduce((a, x) => a + x.w, 0);
   const buildShare = id => bw ? bps.reduce((a, x) => a + x.w * (x.m.get(id) || 0), 0) / bw : 0;
   for (const s of merged) {
@@ -2960,7 +2972,8 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
      -0.5 at 20:00, fell to half its stats' worth, and was suggested for a sideways swap to Bullet Lifesteal until 25:05.
      Needs that stage's statistics (stageAt; the page has them once the match has passed through that stage); otherwise, or
      with the purchase time unknown, the current stage as before. */
-  if (OWN_CTR_AT_PURCHASE.on && stageAt) {
+  // (An owned item's counters from the stage it was bought in, v3.0.2; always on since, the switch folded in v3.6.)
+  if (stageAt) {
     const byPhase = new Map();
     for (const it of ownedItems) {
       const b = bought[it.id]; if (b?.sec == null) continue;
@@ -5799,7 +5812,7 @@ async function reviewStats(hero, enemies, laneIds, anchors) {
     for (const a of anchors) jobs.push(() => getJSON(q({ ...pq, include_item_ids: a })).then(r => { s.fit[a] = r; }).catch(() => {}));
   }
   const laneVs = {};
-  for (const e of laneIds) jobs.push(() => getJSON(q({ ...base, min_bought_at_s: 0, max_bought_at_s: 540, enemy_hero_ids: e, same_lane_filter: "true" })).then(r => { laneVs[e] = r; }).catch(() => {}));
+  for (const e of laneIds) jobs.push(() => getJSON(q({ ...base, min_bought_at_s: 0, max_bought_at_s: STAGE_S.mid, enemy_hero_ids: e, same_lane_filter: "true" })).then(r => { laneVs[e] = r; }).catch(() => {}));
   let fl = null, curve = [], matchups = [];
   jobs.push(() => getJSON(`/v1/analytics/item-flow-stats?${new URLSearchParams({ hero_ids: hero, min_average_badge: minB, max_average_badge: maxB, min_unix_timestamp: from, min_matches: MIN_GAMES })}`).then(res => {
     const tierOf = id => S.itemById[id]?.item_tier ?? null;
@@ -5941,6 +5954,17 @@ function catFitRow(s) {
   if (!c || Math.abs(v) < 0.002) return null;
   const names = (c.anchors || []).slice(0, 3).map(itemName).join(", ");
   return [`Players who own your ${names} do ${v > 0 ? "better" : "worse"} with ${KIND_WORD[s.item.item_slot_type]} items`, `${pts(c.lift)}%`, v > 0 ? "up" : "down"];
+}
+/* The score breakdown (v3.6, see valueParts): each part in win-rate points, the total, and what changed a part. */
+function ledgerTable(s) {
+  const L = valueParts(s), t = document.createElement("table"); t.className = "ledger small";
+  const row = (label, v, cls = "") => { const tr = document.createElement("tr"); if (cls) tr.className = cls;
+    const a = document.createElement("td"); a.textContent = label; const b = document.createElement("td"); b.textContent = `${pts(v)}%`; tr.append(a, b); t.append(tr); };
+  const cap = document.createElement("caption"); cap.textContent = "Score breakdown (win-rate points)"; t.append(cap);
+  for (const [k, label] of LEDGER_PARTS) if (Math.abs(L.parts[k]) >= 0.00005) row(label, L.parts[k]);
+  row("Total", L.sum, "total");
+  for (const n of L.notes) { const tr = document.createElement("tr"); const td = document.createElement("td"); td.colSpan = 2; td.className = "muted"; td.textContent = n; tr.append(td); t.append(tr); }
+  return t;
 }
 /* A counter or situational item whose overall value is below zero and that the buy order leaves out. */
 function weakCounter(s) { return !!(s && s.base && itemValue(s) < 0 && !(S.view?.order || []).some(st => st.s.item.id === s.item.id) && ((s.vs || []).some(v => v.lift > 0) || s.mechWhy?.length)); }
@@ -6596,6 +6620,7 @@ function renderDetail(entry, souls, labelText, box = $("detail")) {
   info.open = S.fullOpen === it.id;
   info.addEventListener("toggle", () => { S.fullOpen = info.open ? it.id : null; });
   const sm = document.createElement("summary"); sm.textContent = "Show the full numbers"; info.append(sm);
+  if (s.base) info.append(ledgerTable(s));
   const ul = document.createElement("ul");
   detailLines(s, kind, souls, entry).forEach(h => { const li = document.createElement("li"); li.innerHTML = h; ul.append(li); });
   info.append(ul);
@@ -7096,7 +7121,7 @@ function showBoard(on) {
    starts just inside that stage (10:30 or 21:30) so the stage doesn't jump back to laning. */
 function autoStartClock() {
   if (S.clockStart != null || S.clockStartedOnce) return;
-  const offset = S.phase === "late" ? 1200 + BLEND_S : S.phase === "mid" ? 540 + BLEND_S : 0;   // just past the blend
+  const offset = S.phase === "late" ? STAGE_S.late + BLEND_S : S.phase === "mid" ? STAGE_S.mid + BLEND_S : 0;   // just past the blend
   S.clockStart = Date.now() - offset * 1000; S.clockStartedOnce = true; S.soulOffset = 0;
   saveMatch(); tickClock(); loadCurve(); updateSouls(true);
 }
