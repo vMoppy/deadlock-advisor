@@ -428,7 +428,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.6</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.7</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -721,10 +721,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.6";   // shown in the top bar and written into match records
+const VERSION = "v3.7";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.7", date: "October 20, 2026", items: [
+    "Fewer green items first in lane. Compared directly, a green item in lane did no better than a gun or spirit item for players of the same hero and net worth, so green items no longer get an extra edge there. Green items that counter the enemy team, or that the match needs, still come first.",
+    "After you skip an item (or a new one comes in ahead), the rest of the buy order keeps its order."] },
   { v: "v3.6", date: "October 19, 2026", items: [
     "Item details › Show the full numbers now starts with a score breakdown: each part of an item's score (its value at this stage, against this enemy team, fit with your items, what the match needs, and so on) and the total, with what changed a part in words.",
     "Behind the scenes: a quality report saved with every release, and checks on all saved matches. Recommendations are unchanged."] },
@@ -927,7 +930,16 @@ const STAGE_AT_PURCHASE = { on: false };
    - Counters against the enemy heroes (0.8) and popularity (0.75) are consistent with face value: unchanged.
    Result: the item a winner bought next was in the top 4 more often (23.1% to 25.1%), and buying the tool's top 4 went
    with winning more often than the situation predicted in 13 of 14 samples (10 before). */
-const ADJ_W = [0.65, 0.45, 0.2, 0.2];   // stage value, per stage column (0-9, 9-20, 20-30, 30+ min)
+const ADJ_W = [0.65, 0.45, 0.2, 0.2];
+/* A correction of the stage value by item kind, per stage column (v3.7), in win-rate points. In lane the stage values said survival
+   items were worth 0.54 points more than gun and spirit items, on average, for the items players bought (backtest, 11,748
+   players); compared directly, a survival purchase did 0.1 points WORSE than a gun or spirit purchase by players of the same hero
+   at the same net worth and survival share (1.1 million purchases; checked hero by hero: 0 ± 1 for most heroes, the largest
+   +2.8 ± 1.1 Infernus and -2.3 ± 1.5). So in lane, survival items get the difference back, at 80% of its measured size (-0.66).
+   Later stages: the two measures agree within their noise (mid) or the direct comparison is muddied by players buying defence
+   when they're behind (20+ min), so no correction there. */
+const KIND_STAGE_ADJ = { on: true, cols: [{ vitality: -0.005 }, {}, {}, {}] };
+const kindAdj = (c, kind) => KIND_STAGE_ADJ.on ? KIND_STAGE_ADJ.cols[c]?.[kind] ?? 0 : 0;   // stage value, per stage column (0-9, 9-20, 20-30, 30+ min)
 const FIT_W = 0.1;                      // build fit
 /* Build fit by kind (v3.4, see catFit): how gun, spirit or survival items as a whole do for players who own your items. Pooling a
    whole kind adds up the games that one item alone doesn't have: for gun McGinnis players most spirit items have under 40 games
@@ -2195,7 +2207,11 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     // is the same for every plan, so a share of it would freeze the order. And not the gap to the worst choice,
     // as up to v2.6: that grew with the number of candidates, so a stale item could keep its place for many minutes
     // after better options appeared, like Monster Rounds in second place from 4:45 to 21:00 in a recorded match.)
-    const prevX = remaining.find(x => x.s.item.id === prev[step]?.id);
+    // The previous plan's item for this place is its first item not yet placed (v3.7), not the one at the same position: when a
+    // new item comes in ahead of them, the old items keep their order behind it. Up to v3.6, an item inserted at one place pushed
+    // the old item there to compete with the next place's old item, so two near-equal items could swap (after a Skip, say).
+    const prevNext = prev.find(p => remaining.some(x => x.s.item.id === p.id));
+    const prevX = prevNext ? remaining.find(x => x.s.item.id === prevNext.id) : null;
     const third = [...scores.values()].sort((a, b) => b - a)[Math.min(2, scores.size - 1)];
     // When you can afford both right now and the other is clearly better (25% more value a second), it simply goes
     // first: their plans differ by only a second, so continuity would otherwise always keep the old one. A near-tie
@@ -2899,9 +2915,10 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   for (const s of merged) {
     const fi = fl?.items.get(s.item.id) || null;
     s.flow = fi;
-    s.adj = fi ? ready.reduce((a, p) => a + (p.w / wsum) * colsOf(p.phase).reduce((b, [c, w]) => b + w * ADJ_W[c] * (fi.cols[c]?.lift ?? 0), 0), 0) : 0;
+    const k = s.item.item_slot_type;
+    s.adj = fi ? ready.reduce((a, p) => a + (p.w / wsum) * colsOf(p.phase).reduce((b, [c, w]) => b + w * (ADJ_W[c] * (fi.cols[c]?.lift ?? 0) + kindAdj(c, k)), 0), 0) : 0;
     // Its stage value at another game time, for purchases the plan makes later (buildOrder's rateAt).
-    if (fi && sec != null) s.adjAt = t => flowColsAt(t).reduce((b, [c, w]) => b + w * ADJ_W[c] * (fi.cols[c]?.lift ?? 0), 0);
+    if (fi && sec != null) s.adjAt = t => flowColsAt(t).reduce((b, [c, w]) => b + w * (ADJ_W[c] * (fi.cols[c]?.lift ?? 0) + kindAdj(c, k)), 0);
     s.timing = timingFor(fi, sec, tagsOf(s.item).has("invest"), fl?.matchLen, { tier: s.item.item_tier, tierShare: fl?.tierShare });
   }
   const ownedItems = [...owned].map(id => itemById[id]).filter(Boolean);
@@ -3003,6 +3020,9 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     const at = b?.sec != null ? fi?.cols?.[flowCol(b.sec)] : null;
     const cols = (fi?.cols || []).filter(Boolean);
     const n = cols.reduce((a, x) => a + x.n, 0);
+    // (The v3.7 lane correction by kind is for purchase choices only, where it was measured: it isn't applied here, so what
+    // you own keeps its v3.6 value and the selling rules, checked on real matches, don't change. Applied here, in the selling
+    // test it halved an owned Tier 1 survival item's value late in a match and made it the first sale.)
     const adj = at ? ADJ_W[flowCol(b.sec)] * at.lift : n ? (fi.cols || []).reduce((a, x, c) => a + (x ? ADJ_W[c] * x.lift * x.n : 0), 0) / n : 0;
     const invest = tagsOf(it).has("invest") ? timingFor(fi, sec, true, fl?.matchLen).factor : 1;
     const g = statsValue({ item: it });
