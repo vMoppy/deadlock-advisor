@@ -428,7 +428,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.7</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.7.1</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -721,10 +721,12 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.7";   // shown in the top bar and written into match records
+const VERSION = "v3.7.1";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.7.1", date: "October 20, 2026", items: [
+    "Fewer 1,600-soul items at the start of a match. An item that few players buy this early (like Healbane or Mystic Vulnerability in lane) no longer gets credit for the good results of the few who rush it, unless it counters the enemy team or the match needs it. Early Tier 2 items that players really do buy in lane can still come up."] },
   { v: "v3.7", date: "October 20, 2026", items: [
     "Fewer green items first in lane. Compared directly, a green item in lane did no better than a gun or spirit item for players of the same hero and net worth, so green items no longer get an extra edge there. Green items that counter the enemy team, or that the match needs, still come first.",
     "After you skip an item (or a new one comes in ahead), the rest of the buy order keeps its order."] },
@@ -992,6 +994,7 @@ const BUILD_ID = { minDamage: 6000, committed: 0.7, bigTier: 3, leanDamage: 3200
 const CTR_KIND_W = { on: true, lane: { weapon: 0.42, spirit: 1, vitality: 0.65 }, mid: { weapon: 1, spirit: 1, vitality: 1 }, late: { weapon: 1, spirit: 0.96, vitality: 0 } };
 const POP_PRIOR = 0.002;     // popularity at this stage: weak evidence (at most +0.2 pts), breaks near-ties
 const RARE_STAGE_SHARE = 0.25;   // bought at this stage by under a quarter of the usual share -> "rarely bought this late"
+const RARE_EARLY = { on: true };   // v3.7.1: the same test for items rarely bought this early (timingFor)
 /* Items your hero rarely buys need stronger evidence. Few buyers means noisier numbers, the players who pick an
    unusual item are an unusual group, and thousands of players choosing otherwise is itself information. An item
    bought by under 10% as many of your hero's players as the most popular item at this stage loses value in
@@ -1821,6 +1824,16 @@ function timingFor(flowItem, sec, invest, matchLen, { tier = null, tierShare = n
     const pct = cur ? Math.round(cur.share * 100) : 0;
     t.note = (t.note ? t.note + " " : "") + `Rarely bought this late: ${pct ? `only ${pct}% of its buyers buy it` : "hardly anyone buys it"} at ${FLOW_COLS[k]}.`;
   }
+  // The mirror image (v3.7.1): rarely bought this early compared with when it's usually bought (before 20 minutes, with data from
+  // later stages). The few players who rush it are mostly those already ahead, so its good numbers here are about them, not the
+  // item: Moppy's Violet (October 20) got Healbane and Mystic Vulnerability first at 0:00 from +7 and +5 points in lane, where
+  // only 6% and 3% of their buyers buy them. Only the evidence is discounted (as out of stage: stage value half, weak reasons
+  // none); its stats keep their full value, and an item players really do buy early (Battle Vest for Holliday) is unaffected.
+  if (RARE_EARLY.on && !t.outOfStage && k <= 1 && cur && cur.rel < RARE_STAGE_SHARE && cols.slice(k + 1).some(x => x && x.n >= MIN_GAMES * 2)) {
+    t.rare = true; t.outOfStage = true;
+    if (!t.kind) t.kind = "later";
+    t.note = (t.note ? t.note + " " : "") + `Rarely bought this early: only ${Math.max(1, Math.round(cur.share * 100))}% of its buyers buy it at ${FLOW_COLS[k]}, so its numbers here say more about who rushes it than about the item.`;
+  }
   // The item's whole tier is out of its stage for this hero (see OUT_STAGE_SHARE): too late, or too early.
   const ts = tierShare?.[k]?.[tier];
   if (tier != null && ts != null && ts < OUT_STAGE_SHARE && !t.outOfStage) {
@@ -1918,7 +1931,8 @@ function overlapReason(s) {
 }
 /* Out of its stage with nothing that makes it worth it in this match: no strong counter or build-fit evidence and
    nothing the live match needs. Such items aren't planned on their own (only as the first step toward an upgrade
-   the plan wants), because a cheap item bought late takes a slot and souls from what you'll really need. */
+   the plan wants), because a cheap item bought late takes a slot and souls from what you'll really need, and an item
+   rarely bought this early (v3.7.1) has nothing but its rushers' numbers behind it. */
 function lacksReason(s) {
   if (s.amp?.none) return true;   // nothing to amplify: never planned on its own (v2.8.3)
   if (s.offBuild && !s.offBuild.reason) return true;   // a big item outside your committed build, with no reason in this match (v3.4)
