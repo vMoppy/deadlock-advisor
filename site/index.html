@@ -428,7 +428,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.7.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.7.2</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -721,10 +721,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.7.1";   // shown in the top bar and written into match records
+const VERSION = "v3.7.2";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.7.2", date: "October 20, 2026", items: [
+    "Buying sooner beats saving early on. The buy order now values having an item soon more than before (measured on real matches), so it suggests saving for a 1,600-soul item in the first minutes much less often. A big item that's clearly worth it still comes first.",
+    "Steadier at 9:00, 20:00 and 30:00: the buy order no longer reshuffles all at once when the game moves to the next stage. Each item now changes when its own numbers do."] },
   { v: "v3.7.1", date: "October 20, 2026", items: [
     "Fewer 1,600-soul items at the start of a match. An item that few players buy this early (like Healbane or Mystic Vulnerability in lane) no longer gets credit for the good results of the few who rush it, unless it counters the enemy team or the match needs it. Early Tier 2 items that players really do buy in lane can still come up."] },
   { v: "v3.7", date: "October 20, 2026", items: [
@@ -902,6 +905,13 @@ const SINGLE_Z = 2.13;       // a counter to ONE enemy must clear this: 90% conf
 const PLAN_HORIZON_S = 600;  // plan at least 10 minutes ahead...
 const PLAN_HORIZON_MAX_S = 1500;   // ...and at most 25: items pay off until the match ends (planHorizon)
 const GENERIC_PER_SOUL = 0.006 / 1000;   // any item's stats are worth something: about +0.6 win-rate points per 1,000 souls
+/* How strongly the plan prefers power now over saving for something bigger (v3.7.2): an item's weight at a time is measured against
+   TEMPO times your net worth, so each second of waiting costs more the smaller it is. With 1 (up to v3.7.1) the first step in the
+   first 3 minutes was a Tier 2 item 29% of the time (players' next purchase: 5%), and players who save for one before 6 minutes
+   don't win more often (Moppy's October 20 feedback: 1,600 items too early). Backtest against 1: 0.25 matches the item players
+   buy next 6% more often (lane first step +13%), with no measurable loss in how those matches go (top 4 +0.1 ± 1.6 points,
+   first step -0.4 ± 1.9); 0.125 started to lose (first step -1.6 ± 1.6). First step Tier 2 in the first 3 minutes: 17%. */
+const TEMPO = 0.25;
 const KEEP_MARGIN = 0.5;     // the previous plan's item stays while it's in the upper half of the gap between the best and third-best choice
 const SOONER_S = 20;         // ...but not a step you'd have to save for when an equally good one can be bought 20 s sooner
 const TIMING_GAP = 0.015;    // a 1.5-point difference between stages counts as a timing pattern
@@ -995,6 +1005,7 @@ const CTR_KIND_W = { on: true, lane: { weapon: 0.42, spirit: 1, vitality: 0.65 }
 const POP_PRIOR = 0.002;     // popularity at this stage: weak evidence (at most +0.2 pts), breaks near-ties
 const RARE_STAGE_SHARE = 0.25;   // bought at this stage by under a quarter of the usual share -> "rarely bought this late"
 const RARE_EARLY = { on: true };   // v3.7.1: the same test for items rarely bought this early (timingFor)
+const STAGE_SMOOTH = { on: true };   // v3.7.2: stage rules and the usual survival share blend across stage boundaries (timingFor, usualVitAt)
 /* Items your hero rarely buys need stronger evidence. Few buyers means noisier numbers, the players who pick an
    unusual item are an unusual group, and thousands of players choosing otherwise is itself information. An item
    bought by under 10% as many of your hero's players as the most popular item at this stage loses value in
@@ -1574,6 +1585,7 @@ function kindNorms(fl, itemById) {
    spend: { weapon, spirit, vitality } souls in items you hold (planned: other planned items, which count only for "first items");
    u: { usual, col } (the usual share and the stage column), or null without the statistics. */
 function survivalPenalty(spend, u) {
+  if (u?.parts) return u.parts.reduce((a, p) => a + p.w * survivalPenalty(spend, { usual: p.usual, col: p.col }), 0);   // near a stage boundary (v3.7.2)
   if (!u || !(u.usual > 0)) return 0;
   const c = Math.min(3, Math.max(0, u.col || 0)), clamp = x => Math.min(1, Math.max(0, x));
   const tot = (spend.weapon || 0) + (spend.spirit || 0) + (spend.vitality || 0);
@@ -1803,7 +1815,19 @@ function timingFor(flowItem, sec, invest, matchLen, { tier = null, tierShare = n
     const end = Math.max(matchLen || 2100, 1500);
     t.factor = Math.min(1, Math.max(0.1, (end - (sec ?? 0)) / (end - 300)));
   }
-  const cols = t.cols, cur = cols[k];
+  const cols = t.cols;
+  /* Near a stage boundary (v3.7.2): within BLEND_S of 9:00, 20:00 or 30:00 the two stages' purchase shares are blended, as their
+     stage values already are, and the rules below may use either stage. Up to v3.7.1 every item's stage changed at once at the
+     boundary, so whole plans changed in one step there: on the saved matches the first step changed in 62% of the 10-second
+     steps across a boundary against 17% of the other steps around it. Now each item changes when its own numbers cross. */
+  const fc = STAGE_SMOOTH.on && sec != null ? flowColsAt(sec) : [[k, 1]];
+  const kLo = fc[0][0], kHi = fc[fc.length - 1][0], w = fc.length > 1 ? fc[1][1] : 0;
+  const mix = (a, b) => a == null ? b : b == null ? a : (1 - w) * a + w * b;
+  let cur = cols[k];
+  if (fc.length > 1) {
+    const a = cols[kLo], b = cols[kHi];
+    cur = a || b ? { lift: mix(a?.lift, b?.lift), raw: mix(a?.raw, b?.raw), rel: (1 - w) * (a?.rel || 0) + w * (b?.rel || 0), share: (1 - w) * (a?.share || 0) + w * (b?.share || 0), n: (a?.n || 0) + (b?.n || 0) } : null;
+  }
   const avail = cols.map((x, c) => x && x.n >= MIN_GAMES * 2 ? c : -1).filter(c => c >= 0);
   if (avail.length >= 2) {
     const best = avail.reduce((a, c) => cols[c].lift > cols[a].lift ? c : a, avail[0]);
@@ -1817,8 +1841,8 @@ function timingFor(flowItem, sec, invest, matchLen, { tier = null, tierShare = n
   // Rarely bought at this stage (well under the usual share of purchases), or hardly at all: its value
   // here isn't backed by data, and most players have moved on to bigger items. Read from the data, not a
   // fixed time limit, so an item players really do buy late isn't affected.
-  const earlier = cols.slice(0, k).filter(x => x && x.n >= MIN_GAMES * 2).length;
-  if (k >= 2 && earlier && (!cur || cur.rel < RARE_STAGE_SHARE)) {
+  const earlier = cols.slice(0, kHi).filter(x => x && x.n >= MIN_GAMES * 2).length;
+  if (kHi >= 2 && earlier && (!cur || cur.rel < RARE_STAGE_SHARE)) {
     t.factor *= 0.6; t.rare = true; t.outOfStage = true;
     if (!t.kind) t.kind = "early";
     const pct = cur ? Math.round(cur.share * 100) : 0;
@@ -1829,13 +1853,13 @@ function timingFor(flowItem, sec, invest, matchLen, { tier = null, tierShare = n
   // item: Moppy's Violet (October 20) got Healbane and Mystic Vulnerability first at 0:00 from +7 and +5 points in lane, where
   // only 6% and 3% of their buyers buy them. Only the evidence is discounted (as out of stage: stage value half, weak reasons
   // none); its stats keep their full value, and an item players really do buy early (Battle Vest for Holliday) is unaffected.
-  if (RARE_EARLY.on && !t.outOfStage && k <= 1 && cur && cur.rel < RARE_STAGE_SHARE && cols.slice(k + 1).some(x => x && x.n >= MIN_GAMES * 2)) {
+  if (RARE_EARLY.on && !t.outOfStage && kLo <= 1 && cur && cur.rel < RARE_STAGE_SHARE && cols.slice(kLo + 1).some(x => x && x.n >= MIN_GAMES * 2)) {
     t.rare = true; t.outOfStage = true;
     if (!t.kind) t.kind = "later";
     t.note = (t.note ? t.note + " " : "") + `Rarely bought this early: only ${Math.max(1, Math.round(cur.share * 100))}% of its buyers buy it at ${FLOW_COLS[k]}, so its numbers here say more about who rushes it than about the item.`;
   }
   // The item's whole tier is out of its stage for this hero (see OUT_STAGE_SHARE): too late, or too early.
-  const ts = tierShare?.[k]?.[tier];
+  const ts = fc.length > 1 ? mix(tierShare?.[kLo]?.[tier], tierShare?.[kHi]?.[tier]) : tierShare?.[k]?.[tier];
   if (tier != null && ts != null && ts < OUT_STAGE_SHARE && !t.outOfStage) {
     const peak = tierShare.reduce((best, x, c) => (x?.[tier] || 0) > (tierShare[best]?.[tier] || 0) ? c : best, 0);
     t.factor *= 0.6; t.outOfStage = true;
@@ -2057,7 +2081,9 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
      total investment then (net worth grows by your income): 800 souls of stats are a large share of your power
      at 3,000 net worth and a small one at 20,000. So power now is worth more than the same power later, which
      is the real cost of saving for something big. */
-  const N = nwNow != null ? Math.max(1000, nwNow) : null;   // floor: avoids an extreme weight at the very start
+  // TEMPO (v3.7.2) sets how fast that weight falls: measured on the backtest, power now is worth more than "800 souls against your
+  // whole net worth" said (see TEMPO).
+  const N = nwNow != null ? TEMPO * Math.max(1000, nwNow) : null;   // floor: avoids an extreme weight at the very start
   const W = (a, b) => {
     if (!(b > a)) return 0;
     if (N == null) return b - a;
@@ -2943,7 +2969,14 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   /* Your build (v3.4): what kind it is, enough survival items, and big items outside a committed build. */
 
   const norms = kindNorms(fl, itemById);
-  const usualVitAt = t => { const col = flowCol(t ?? 0), n = norms?.[col]; return n ? { usual: n.vitality, col } : null; };
+  // Blended across stage boundaries like the stage values (v3.7.2): the penalty is worked out for both stages and mixed.
+  const usualVitAt = t => {
+    const fcs = STAGE_SMOOTH.on ? flowColsAt(t ?? 0) : [[flowCol(t ?? 0), 1]];
+    const us = fcs.map(([col, w]) => norms?.[col] ? { usual: norms[col].vitality, col, w } : null);
+    if (us.some(u => !u)) { const u = us.find(Boolean) || null; return u && { usual: u.usual, col: u.col }; }
+    if (us.length === 1) return { usual: us[0].usual, col: us[0].col };
+    return { usual: us[0].w * us[0].usual + us[1].w * us[1].usual, col: us[1].w >= 0.5 ? us[1].col : us[0].col, parts: us };
+  };
   const spendNow = { weapon: identity.weapon, spirit: identity.spirit, vitality: identity.vitality };
   const usualNow = usualVitAt(sec);
   for (const s of merged) {
