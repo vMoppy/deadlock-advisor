@@ -428,7 +428,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.7.2</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.8</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -721,10 +721,12 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.7.2";   // shown in the top bar and written into match records
+const VERSION = "v3.8";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.8", date: "October 21, 2026", items: [
+    "Right after you buy something in a live match, the next suggestion now uses your souls after the purchase. A purchase reaches the tool in two parts (the item, then your souls a moment later), and for about half of big purchases the first suggestion was worked out with the souls you'd just spent and then kept for 10 seconds."] },
   { v: "v3.7.2", date: "October 20, 2026", items: [
     "Buying sooner beats saving early on. The buy order now values having an item soon more than before (measured on real matches), so it suggests saving for a 1,600-soul item in the first minutes much less often. A big item that's clearly worth it still comes first.",
     "Steadier at 9:00, 20:00 and 30:00: the buy order no longer reshuffles all at once when the game moves to the next stage. Each item now changes when its own numbers do."] },
@@ -1934,12 +1936,17 @@ const OVERLAP_REASON = { on: true };
    step can't be planned any more (owned, skipped, or no reason left); or the new one answers something new in the match (a
    counter that wasn't in the shown top 4, or what the match needs grew by SETTLE.urgent). On the recorded matches, 10 s cuts
    the shown first-step changes by about a third. Never used for changes you make by hand (only during a live match).
-   st: { order, ownedSig, pending: { id, since } } (the shown plan) or null. Returns { keep, pending, why }. */
-const SETTLE = { on: true, ms: 10000, urgent: 0.005 };
+   v3.8: also at once for SETTLE.afterItems after your items change. A purchase arrives in two parts within a quarter of a second
+   (the new item, then your lower souls: 399 of 400 purchases in the saved matches, 90% within 0.25 s), so the plan shown at the
+   item's arrival was worked out with souls you had already spent, and the corrected plan a moment later was then held for 10 s
+   (Moppy's Venator, October 20, 20:00: Melee Charge and Crushing Fists instead of Point Blank, the item he bought).
+   st: { order, ownedSig, ownedAt, pending: { id, since } } (the shown plan) or null. Returns { keep, pending, why }. */
+const SETTLE = { on: true, ms: 10000, urgent: 0.005, afterItems: 3000 };
 function settleFirst(st, order, { now, ownedSig, scoredById, skipped = new Set(), owned = new Set() }) {
   const nf = order[0]?.s.item.id, sf = st?.order?.[0]?.s.item.id;
   if (!SETTLE.on || !st || sf == null || nf == null || nf === sf) return { keep: false, pending: null, why: "same" };
   if (st.ownedSig !== ownedSig) return { keep: false, pending: null, why: "your items changed" };
+  if (now - (st.ownedAt ?? -Infinity) < SETTLE.afterItems) return { keep: false, pending: null, why: "your purchase is still arriving" };
   const shownNow = scoredById.get(sf);
   if (!shownNow || owned.has(sf) || skipped.has(sf) || lacksReason(shownNow)) return { keep: false, pending: null, why: "shown step no longer valid" };
   const newS = order[0].s, wasTop = st.order.slice(0, 4).some(x => x.s.item.id === nf);
@@ -6812,8 +6819,8 @@ function renderResultsInner() {
     if (d.keep) {
       order = S.settle.order; S.settle.pending = d.pending; LIVE.settleHeld = (LIVE.settleHeld || 0) + 1;
       clearTimeout(S.settleTimer); S.settleTimer = setTimeout(renderResults, Math.max(50, d.pending.since + SETTLE.ms - Date.now() + 50));
-    } else S.settle = { order: planned, ownedSig, pending: null };
-  } else S.settle = { order: planned, ownedSig, pending: null };
+    } else S.settle = { order: planned, ownedSig, ownedAt: S.settle?.ownedSig === ownedSig ? S.settle.ownedAt : Date.now(), pending: null };
+  } else S.settle = { order: planned, ownedSig, ownedAt: S.settle?.ownedSig === ownedSig ? S.settle.ownedAt : Date.now(), pending: null };
 
   // Possible unmarked purchases (see checkSoulsDrop); drop the ones that are owned or were just sold.
   const now = Date.now();
