@@ -273,6 +273,11 @@
   .next .cost { display: grid; gap: 4px; justify-items: end; }
   .eyebrow { font: 700 12px var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
   .moved { font-size: 11px; font-weight: 600; color: var(--warn); }
+  .conf { font-size: 11px; font-weight: 600; margin-left: 6px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line); display: inline-block; }
+  .conf.solid { color: var(--good); border-color: var(--good); }
+  .conf.close { color: var(--muted); font-weight: 500; }
+  .conf.lead { margin: 0 6px 0 0; }
+  .row .conf, .next .eyebrow .conf { display: inline; padding: 0 4px; line-height: inherit; font-size: 10.5px; }
   .plan { font-size: 12.5px; font-weight: 600; color: var(--fg); margin-top: 2px; }
   #dropped { display: grid; gap: 4px; border-top: 1px dashed var(--line); padding-top: 6px; }
   .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -428,7 +433,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.8</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.9</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -721,10 +726,14 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.8";   // shown in the top bar and written into match records
+const VERSION = "v3.9";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.9", date: "October 21, 2026", items: [
+    "Each buy-order step now says how sure the tool is: \"Solid pick\" when it's clearly ahead of the next option, or \"Close call\" when the two are about as good and your read of the match should decide. Hover the label to see the runner-up.",
+    "Checked on real matches: players who followed a solid pick won about 2% more often than those who chose its runner-up; for close calls it made no difference.",
+    "What you'd give up, in an item's details, now names that same runner-up."] },
   { v: "v3.8", date: "October 21, 2026", items: [
     "Right after you buy something in a live match, the next suggestion now uses your souls after the purchase. A purchase reaches the tool in two parts (the item, then your souls a moment later), and for about half of big purchases the first suggestion was worked out with the souls you'd just spent and then kept for 10 seconds."] },
   { v: "v3.7.2", date: "October 20, 2026", items: [
@@ -1675,7 +1684,7 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
     const vs = [];
     // Signed: a result against one enemy is offset by a worse one against another. Summing only the good
     // results rewarded noisy items (few buyers -> big random swings), which are often the expensive ones.
-    let score = 0, best = 0, num = 0, den = 0;
+    let score = 0, best = 0, num = 0, den = 0, scoreVar = 0;
     for (const { enemyId, idx, shift } of enemies) {
       const r = idx.get(it.id);
       if (!r || r.matches < MIN_GAMES) continue;
@@ -1695,17 +1704,21 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
       const weight = (threat.get(enemyId) || 1) * (phase === "lane" && laneIds.has(enemyId) ? 2 : 1);
       vs.push({ enemyId, lift, z, n: r.matches, pe, shift, lane: laneInfo });
       score += lift * trust(se, TAU_ENEMY) * weight;
+      scoreVar += (se * trust(se, TAU_ENEMY) * weight) ** 2;   // v3.9: how uncertain the counter score is (valueSe)
       num += weight * lift; den += (weight * se) ** 2;
       if (z > best) best = z;
     }
-    if (CTR_KIND_W.on) score *= CTR_KIND_W[phase]?.[it.item_slot_type] ?? 1;   // v3.5: as much as counters of this kind predicted winning
+    const ctrW = CTR_KIND_W.on ? CTR_KIND_W[phase]?.[it.item_slot_type] ?? 1 : 1;
+    score *= ctrW;   // v3.5: as much as counters of this kind predicted winning
+    const scoreSe = Math.sqrt(scoreVar) * ctrW;
     // One test across the whole enemy team, so 6 chances to look good by luck don't count as evidence.
     const counterZ = den ? num / Math.sqrt(den) : 0;
     const fits = (fit[it.id] || []).filter(f => owned.has(f.anchorId));
-    let fitScore = 0, fitZ = 0;
+    let fitScore = 0, fitZ = 0, fitVar = 0;
     for (const f of fits) {
       const fse = Math.abs(f.z) > 1e-9 ? Math.abs(f.lift / f.z) : 1;
       fitScore += (f.w ?? 1) * f.lift * trust(fse, TAU_FIT);   // signed: "pairs poorly" counts against, like "pairs well" counts for
+      fitVar += ((f.w ?? 1) * fse * trust(fse, TAU_FIT)) ** 2;
       // Pair fits (v2.8.2) count toward the value but don't make an item a "build" pick on their own: their large samples
       // make many small effects look certain.
       if (f.src !== "pair" && f.z > fitZ) fitZ = f.z;
@@ -1713,7 +1726,7 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
     const cost = effectiveCost(it, owned, itemByClass);
     // Build fit by kind (v3.4): how this item's whole kind does for players who own your items.
     const cf = catFitFor(cat, it.item_slot_type, owned);
-    out.push({ item: it, base: b, pb, vs, score, bestZ: best, counterZ, fits, fitScore, fitZ, catFit: cf ? cf.score * (committed && phase === "late" ? CAT_PHASE_W.committed : (CAT_PHASE_W[phase] ?? 1)) : 0, catZ: cf ? cf.z : 0, catInfo: cf, cost, affordable: cost <= souls, pop: b.players });
+    out.push({ item: it, base: b, pb, vs, score, scoreSe, bestZ: best, counterZ, fits, fitScore, fitSe: Math.sqrt(fitVar), fitZ, catFit: cf ? cf.score * (committed && phase === "late" ? CAT_PHASE_W.committed : (CAT_PHASE_W[phase] ?? 1)) : 0, catZ: cf ? cf.z : 0, catInfo: cf, cost, affordable: cost <= souls, pop: b.players });
   }
   return out;
 }
@@ -1749,14 +1762,14 @@ function mergeScored(lists) {
   const m = new Map();
   for (const { scored, w } of lists) {
     for (const s of scored) {
-      const e = m.get(s.item.id) || { score: 0, fitScore: 0, bestZ: 0, counterZ: 0, fitZ: 0, catFit: 0, catZ: 0, pop: 0, best: null, bestW: -1 };
-      e.score += w * s.score; e.fitScore += w * s.fitScore; e.bestZ += w * s.bestZ; e.counterZ += w * (s.counterZ || 0); e.fitZ += w * s.fitZ; e.pop += w * s.base.players;
+      const e = m.get(s.item.id) || { score: 0, fitScore: 0, bestZ: 0, counterZ: 0, fitZ: 0, catFit: 0, catZ: 0, pop: 0, scoreSe: 0, fitSe: 0, best: null, bestW: -1 };
+      e.score += w * s.score; e.fitScore += w * s.fitScore; e.scoreSe += w * (s.scoreSe || 0); e.fitSe += w * (s.fitSe || 0); e.bestZ += w * s.bestZ; e.counterZ += w * (s.counterZ || 0); e.fitZ += w * s.fitZ; e.pop += w * s.base.players;
       e.catFit += w * (s.catFit || 0); e.catZ += w * (s.catZ || 0);
       if (w > e.bestW) { e.best = s; e.bestW = w; }
       m.set(s.item.id, e);
     }
   }
-  return [...m.values()].map(e => ({ ...e.best, score: e.score, fitScore: e.fitScore, bestZ: e.bestZ, counterZ: e.counterZ, fitZ: e.fitZ, catFit: e.catFit, catZ: e.catZ, pop: e.pop }));
+  return [...m.values()].map(e => ({ ...e.best, score: e.score, fitScore: e.fitScore, bestZ: e.bestZ, counterZ: e.counterZ, fitZ: e.fitZ, catFit: e.catFit, catZ: e.catZ, pop: e.pop, scoreSe: e.scoreSe, fitSe: e.fitSe }));
 }
 
 /* ---------- Item value at this stage, without the "richer players win more" bias ----------
@@ -1916,6 +1929,22 @@ function valueParts(s, sumOnly = false) {
   const sum = adj + ctr + fit + needs + popularity + rarity + survival;
   return sumOnly ? sum : { parts: { stage: adj, counters: ctr, fit, needs, popularity, rarity, survival }, notes, sum };
 }
+/* How uncertain an item's value is (v3.9), in the same units: the standard errors of its stage value, counter score and build fit
+   (each after the shrinking that sets the value), combined as independent. The other parts (needs, popularity, rarity, survival)
+   are read from the game data or set by rule, so they add none. An item without statistics gets VALUE_SE_NONE for its stage value. */
+const VALUE_SE_NONE = TAU_ITEM;
+function valueSe(s) {
+  const adj = s.adjSe ?? ADJ_W[0] * VALUE_SE_NONE, ctr = s.scoreSe || 0, fit = FIT_W * (s.fitSe || 0);
+  const cat = Math.abs(s.catZ || 0) > 0.3 ? CAT_FIT_W * Math.abs((s.catFit || 0) / s.catZ) : 0;
+  return Math.sqrt(adj * adj + ctr * ctr + fit * fit + cat * cat);
+}
+/* Confidence labels (v3.9) from a step's z against the best other choice (see buildOrder's planConfidence). Two levels, because
+   that's what the backtest supports (162,353 moments, situations matched by hero, stage, team lead and your souls): first steps at
+   z >= 1.3 (19%) were followed by players who then won 2.3 ± 1.1 points more often than the situation predicted, and 2.1 ± 1.5 more
+   than players who bought the runner-up instead; below it (81%), buying the step or its runner-up made no difference (+0.2 ± 0.8),
+   a coin flip between the two. A middle band (0.5 to 1.3) did no better than the close calls (−0.1 ± 1.4), so it isn't shown. */
+const CONF = { solid: 1.3 };
+function confLabel(z) { return z >= CONF.solid ? "solid" : "close"; }
 /* A reason in this match for a big item outside a committed build (v3.4, see BUILD_ID): a convincing counter, a convincing fit with
    your items (one item, or its whole kind), or what the live match needs. Returns its name, or null. */
 function offBuildReason(s) {
@@ -2186,12 +2215,15 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
        often (Extended Magazine then Titanic Magazine, Sprint Boots then Trophy Collector in two v2.8 records). A part
        the plan itself buys first already stopped counting at the upgrade (below). */
     for (const u of usedUp) if (u.seq < 0 && Number.isFinite(T[u.at])) v -= u.rate * W(T[u.at], horizon);
+    const wt = [];   // v3.9: how much each item's value counts in this plan (for planConfidence)
     seq.forEach((x, i) => {
       if (blocked.has(i)) return;
       let end = horizon;
       for (let j = i + 1; j < seq.length; j++) if (!blocked.has(j) && (consumes(seq[j], x) || sells[j]?.seq === i)) { end = Math.min(end, T[j]); break; }
       if (x.covered && end >= horizon) return;   // a repurchased part is only worth something as the step to its upgrade
-      v += (rates[i] ?? rateAt(x, T[i])) * W(T[i], end);
+      const wi = W(T[i], end);
+      v += (rates[i] ?? rateAt(x, T[i])) * wi;
+      wt[i] = wi * (x.s.timing?.factor ?? 1) * (x.covered ? 0.5 : 1);
     });
     /* Souls the sequence doesn't spend aren't worthless: they'd go on something else. Count them at the value of
        an average item's stats from when they're earned, so a plan isn't better just because it lists more items. */
@@ -2201,7 +2233,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     const steps = 24, dt = (horizon - lastT) / steps;
     for (let k = 0; k < steps; k++) tail += r * dt * W(lastT + (k + 0.5) * dt, horizon);
     v += GENERIC_PER_SOUL * tail;
-    return { v, T, costs, sells, blocked };
+    return { v, T, costs, sells, blocked, wt };
   };
   const density = (x, have) => rateOf(x) / Math.max(100, effectiveCost(x.s.item, have, itemByClass));
   /* The rest of a sequence being judged, most value per soul first. With "enough" survival items (v3.4) each survival item's value
@@ -2229,23 +2261,38 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
   };
   const steps = [];
   const chosen = [];
+  /* How sure this step is (v3.9): its plan against the best other choice at the same place, in standard errors of the difference.
+     The difference's uncertainty comes from the items' value uncertainties (valueSe), each weighted by how differently the two
+     plans count it (an item bought sooner in one plan counts for longer there). Returns { z, alt, gap } or null. */
+  const confs = [];
+  const planConfidence = (x, scores, seqs) => {
+    let alt = null, altV = -Infinity;
+    for (const [y, v] of scores) if (y !== x && !consumes(y, x) && !consumes(x, y) && v > altV) { alt = y; altV = v; }
+    if (!alt || !scores.has(x)) return null;
+    const ex = ({ seq, wt }) => { const m = new Map(); seq.forEach((y, i) => { if (wt[i]) m.set(y, (m.get(y) || 0) + wt[i]); }); return m; };
+    const a = ex(seqs.get(x)), b = ex(seqs.get(alt));
+    let v2 = 0;
+    for (const y of new Set([...a.keys(), ...b.keys()])) { const d = (a.get(y) || 0) - (b.get(y) || 0), se = valueSe(y.s); v2 += (d * se) ** 2; }
+    const gap = scores.get(x) - altV, sd = Math.sqrt(v2);
+    return { z: sd > 0 ? gap / sd : (gap > 0 ? Infinity : -Infinity), alt: alt.s.item.id, gap };
+  };
   let remaining = cands.slice();
   for (let step = 0; step < maxSteps && remaining.length; step++) {
     const have = new Set([...owned, ...chosen.map(x => x.s.item.id)]);
     let best = null, bestV = -Infinity;
-    const scores = new Map();
+    const scores = new Map(), seqs = new Map();
     for (const x of remaining) {
       if (chosen.some(y => consumes(y, x))) continue;   // a part of something already planned
       const rest = restOrder(remaining.filter(y => y !== x && !consumes(x, y)), have, [...chosen, x]);
-      let ev = evaluate([...chosen, x, ...rest]);
+      let seqX = [...chosen, x, ...rest], ev = evaluate(seqX);
       // A part is bought for its upgrade: also try the upgrade straight after it (the general ordering may put
       // it later), so "buy the part now, upgrade when you can" is judged fairly against saving for the upgrade.
       for (const u of remaining.filter(y => consumes(y, x)).slice(0, 2)) {
-        const ev2 = evaluate([...chosen, x, u, ...rest.filter(y => y !== u)]);
-        if (!ev2.blocked.has(chosen.length) && ev2.v > ev.v) ev = ev2;
+        const s2 = [...chosen, x, u, ...rest.filter(y => y !== u)], ev2 = evaluate(s2);
+        if (!ev2.blocked.has(chosen.length) && ev2.v > ev.v) { ev = ev2; seqX = s2; }
       }
       if (ev.blocked.has(chosen.length)) continue;   // no room for it, and nothing is worth selling for it
-      scores.set(x, ev.v);
+      scores.set(x, ev.v); seqs.set(x, { seq: seqX, wt: ev.wt });
       if (ev.v > bestV) { bestV = ev.v; best = x; }
     }
     if (!best) break;
@@ -2273,11 +2320,12 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
     const wait = x => Math.max(0, effectiveCost(x.s.item, have, itemByClass) - left) / r;
     const sooner = prevX && prevX !== best && scores.has(prevX) && bestV >= scores.get(prevX) && wait(prevX) - wait(best) >= SOONER_S;
     if (prevX && !bothNow && !sooner && scores.has(prevX) && bestV - scores.get(prevX) <= KEEP_MARGIN * (bestV - third)) best = prevX;
+    confs[step] = planConfidence(best, scores, seqs);
     chosen.push(best);
     remaining = remaining.filter(x => x !== best && !consumes(best, x));
   }
   // A repurchased part only makes sense if its upgrade made it into the plan.
-  for (let i = chosen.length - 1; i >= 0; i--) if (chosen[i].covered && !chosen.slice(i + 1).some(y => consumes(y, chosen[i]))) chosen.splice(i, 1);
+  for (let i = chosen.length - 1; i >= 0; i--) if (chosen[i].covered && !chosen.slice(i + 1).some(y => consumes(y, chosen[i]))) { chosen.splice(i, 1); confs.splice(i, 1); }
   /* Full slots (v2.8.7): when nothing more fits without a sale beyond the next two purchases, the rest of the list is filled
      with steps that need one ("if your slots are still full"), judged by the same sale rules. The steps already chosen don't
      change. Up to v2.8.6 the list stopped at two in most of a late game (Moppy's McGinnis match, October 14). */
@@ -2302,6 +2350,7 @@ function buildOrder(groups, souls, owned, itemByClass, { prev = [], scoredById =
   chosen.forEach((x, i) => {
     const cost = costs[i]; running += cost - (sells[i]?.refund || 0);
     const st = { s: { ...x.s, cost }, kind: x.kind, cumulative: running, affordable: running <= souls, eta: T[i], value: itemValue(x.s), perSoul: density(x, new Set(owned)) };
+    if (confs[i]) st.conf = { ...confs[i], label: confLabel(confs[i].z) };
     const into = chosen.slice(i + 1).find(y => consumes(y, x));
     if (into) st.into = into.s.item.id;
     if (into) { st.why = `Builds into ${into.s.item.name}`; st.plan = `Part of ${into.s.item.name}: the souls count toward it, and you get its stats while you save.`; if (x.kind === "core") st.kind = "part"; }
@@ -2964,6 +3013,8 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     s.flow = fi;
     const k = s.item.item_slot_type;
     s.adj = fi ? ready.reduce((a, p) => a + (p.w / wsum) * colsOf(p.phase).reduce((b, [c, w]) => b + w * (ADJ_W[c] * (fi.cols[c]?.lift ?? 0) + kindAdj(c, k)), 0), 0) : 0;
+    // Its uncertainty (v3.9): the same mix of the columns' standard errors after shrinking (a column without data: VALUE_SE_NONE).
+    s.adjSe = fi ? ready.reduce((a, p) => a + (p.w / wsum) * colsOf(p.phase).reduce((b, [c, w]) => { const x = fi.cols[c]; return b + w * ADJ_W[c] * (x ? x.se * trust(x.se, TAU_ITEM) : VALUE_SE_NONE); }, 0), 0) : ADJ_W[0] * VALUE_SE_NONE;
     // Its stage value at another game time, for purchases the plan makes later (buildOrder's rateAt).
     if (fi && sec != null) s.adjAt = t => flowColsAt(t).reduce((b, [c, w]) => b + w * (ADJ_W[c] * (fi.cols[c]?.lift ?? 0) + kindAdj(c, k)), 0);
     s.timing = timingFor(fi, sec, tagsOf(s.item).has("invest"), fl?.matchLen, { tier: s.item.item_tier, tierShare: fl?.tierShare });
@@ -6082,6 +6133,20 @@ function selectable(el, entry) {
 }
 
 /* Marks on a buy-order step that change what you do: a sale first, or a deliberate repurchase. */
+/* How sure a buy-order step is (v3.9, see confLabel): a small label after its name. A close call names its runner-up. */
+function confText(entry) {
+  const c = entry?.conf; if (!c) return null;
+  const alt = S.itemById[c.alt]?.name || "the next option";
+  return c.label === "solid"
+    ? { short: "Solid pick", long: `Clearly ahead of the next option (${alt}), even allowing for how sure the numbers are. In real matches, players who bought steps rated like this won about 2% more often than players who chose the runner-up instead.` }
+    : { short: `Close call · or ${alt}`, long: `About as good as ${alt}: within how sure the numbers are. In real matches the two did the same, so go with your read of the match.` };
+}
+function confBadge(entry, short = false) {
+  const t = confText(entry); if (!t) return null;
+  const b = document.createElement("span"); b.className = "conf " + entry.conf.label; b.title = t.long;
+  b.textContent = short ? (entry.conf.label === "solid" ? "Solid pick" : "Close call") : t.short;   // in list rows the runner-up is in the title
+  return b;
+}
 function stepMarks(entry) {
   const out = [];
   if (entry.sell) { const m = document.createElement("span"); m.className = "tag-sell"; m.textContent = `${entry.sell.later ? "If slots are still full: sell" : "Sell"} ${entry.sell.item?.name || "an item"} first (+${entry.sell.refund.toLocaleString()}) · `; out.push(m); }
@@ -6112,6 +6177,7 @@ function rowEl(entry, souls, n) {
   const nm = document.createElement("span"); nm.className = "name"; nm.textContent = it.name;
   if (entry.movedUp) { const m = document.createElement("span"); m.className = "moved"; m.textContent = "  new"; nm.append(m); }
   const rs = document.createElement("span"); rs.className = "reason"; rs.append(...stepMarks(entry), shortReason(s, kind, why));
+  const cb = confBadge(entry, true); if (cb) { cb.classList.add("lead"); rs.prepend(cb); }   // v3.9: on the reason line, so rows keep their height
   mid.append(nm, rs);
   el.append(ord, img(itemIcon(it)), mid, costCell(s, souls, entry.cumulative ?? s.cost), buyButton(it, s.cost), skipButton(it, entry));
   selectable(el, entry);
@@ -6125,6 +6191,7 @@ function nextCard(entry, souls) {
   const mid = document.createElement("div"); mid.style.minWidth = "0";
   const eb = document.createElement("div"); eb.className = "eyebrow"; eb.textContent = "Buy next";
   const nm = document.createElement("div"); nm.className = "name"; nm.textContent = it.name;
+  const cb = confBadge(entry, true); if (cb) eb.append(cb);   // v3.9: beside "Buy next", outside the name; the runner-up is in its title and under What you'd give up
   const rs = document.createElement("div"); rs.className = "reason"; rs.append(...stepMarks(entry), shortReason(s, kind, why));
   mid.append(eb, nm, rs);
   if (entry.plan) { const pl = document.createElement("div"); pl.className = "plan"; pl.textContent = entry.plan; mid.append(pl); }
@@ -6235,6 +6302,11 @@ function threeParts(entry, souls, view = S.view) {
     const sold = entry.sell.item?.name || "an item";
     giveShort = `Sell ${sold} (you get back ${entry.sell.refund.toLocaleString()})`;
     giveLong = `Your slots are full, so this means selling ${sold}: you get back ${entry.sell.refund.toLocaleString()} souls, half its price, and lose what it gives you. It's worth clearly less to you now than ${it.name}.`;
+  } else if (entry.conf && S.itemById[entry.conf.alt]) {
+    // v3.9: a buy-order step is compared with the plan's own best other choice at this place, and says how sure that is (confText).
+    const alt = S.itemById[entry.conf.alt].name;
+    giveShort = entry.conf.label === "solid" ? `Instead of ${alt}: a solid pick over it` : `A close call with ${alt}: either is fine`;
+    giveLong = confText(entry).long;
   } else {
     // The best other item at about this price that the plan doesn't buy first.
     const planned = new Set((view?.order || []).slice(0, 1).map(x => x.s.item.id));
@@ -6379,6 +6451,7 @@ function renderMatchView() {
   const mid = document.createElement("div"); mid.style.minWidth = "0";
   mid.innerHTML = `<div class="mv-eyebrow">Buy next${next.sell ? " · slots full" : ""}</div><div class="mv-name"></div><div class="mv-cost"><span class="price"></span> · <span class="${need ? "need" : "can"}"></span></div>`;
   mid.querySelector(".mv-name").textContent = it.name;
+  { const cb = confBadge(next); if (cb) mid.querySelector(".mv-eyebrow").append(cb); }   // v3.9
   mid.querySelector(".price").textContent = `${next.s.cost.toLocaleString()} souls` + (next.upgrade ? ` (upgrade to Tier ${it.item_tier})` : "");
   mid.querySelector(need ? ".need" : ".can").textContent = need ? `${need.toLocaleString()} more needed` : "you can buy it now";
   const bar = document.createElement("div"); bar.className = "mv-bar"; bar.setAttribute("role", "progressbar"); bar.setAttribute("aria-label", "Souls toward the next buy");
