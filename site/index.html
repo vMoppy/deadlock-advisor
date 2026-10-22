@@ -247,6 +247,16 @@
     padding: 5px 8px; border: 1px solid var(--line); border-left: 4px solid var(--slot); border-radius: 7px; background: var(--bg); cursor: pointer; }
   .row[aria-selected="true"] { border-color: var(--accent); border-left-color: var(--slot); background: var(--accent-soft); }
   .row img { width: 26px; height: 26px; }
+  /* v3.9.1: two lines per row: the name, the price and the buttons, then the reason across the row, with what you still need at
+     its end. The reason gets about twice the room (at 1366 wide "Upgrade to Tier 2 · Upgrade Sprint Boots"
+     was cut to a few words; Moppy, October 22) and the name a little more, with the rows' height unchanged. */
+  .row { grid-template-rows: auto auto; row-gap: 1px; }
+  .row > .ord, .row > img { grid-row: 1 / span 2; }
+  .row > .cost { grid-column: 4; grid-row: 1; }
+  .row > .row-sub { grid-column: 3 / -1; grid-row: 2; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+  .row-sub > .reason { flex: 1 1 auto; min-width: 0; }
+  .row-sub > .afford, .row-sub > .need { flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .row > .buy, .row > .skip { padding-top: 2px; padding-bottom: 2px; height: 22px; line-height: 1; }
   .ord { font: 700 16px/1 var(--display); color: var(--accent); min-width: 12px; text-align: center; }
   .ord:empty { min-width: 0; }
   .name { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -270,6 +280,8 @@
   .next img { width: 44px; height: 44px; }
   .next .name { font: 700 21px/1.05 var(--display); letter-spacing: .02em; white-space: normal; }
   .next .reason { white-space: normal; font-size: 12.5px; }
+  /* v3.9.1: on a narrow screen a buy-order reason may take a second line instead of being cut off (Moppy, October 22). */
+  @media (max-width: 560px) { .row .reason { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
   .next .cost { display: grid; gap: 4px; justify-items: end; }
   .eyebrow { font: 700 12px var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
   .moved { font-size: 11px; font-weight: 600; color: var(--warn); }
@@ -362,6 +374,12 @@
   .mv-then li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; align-items: center; gap: 2px 10px; padding: 6px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
   .mv-then li > img { width: 24px; height: 24px; border-radius: 4px; }
   .mv-then .skip { font-size: 13px; }
+  .mv-then .mv-acts { display: flex; gap: 6px; align-items: center; }
+  .mv-then .mv-acts .buy, .mv-then .mv-acts .btn { font-size: 13px; padding: 3px 8px; }
+  .mv-then li > .mv-detail { grid-column: 1 / -1; font-size: 15px; margin-top: 6px; }
+  /* A phone: the name on its own line, then the price and the buttons (v3.9.1), so a step stays two lines. */
+  @media (max-width: 480px) { .mv-then li > .nm { grid-column: 2 / -1; grid-row: 1; } .mv-then li > .c { grid-column: 2; grid-row: 2; font-size: 14px; }
+    .mv-then .mv-acts { grid-column: 3 / -1; grid-row: 2; justify-content: flex-end; } .mv-then .mv-acts .bw { display: none; } }
   .mv-then .sub { grid-column: 2 / -1; font-size: 14px; color: var(--muted); display: block; padding: 0; border: 0; }
   .mv-detail { border-top: 1px solid var(--line); padding-top: 12px; }
   /* Three-part explanation (v3.0): why this item, why now, what you'd give up. */
@@ -433,7 +451,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.9</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.9.1</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -726,10 +744,14 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.9";   // shown in the top bar and written into match records
+const VERSION = "v3.9.1";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.9.1", date: "October 22, 2026", items: [
+    "Compact mode: every step in the buy order now has Bought and Details, not just the next buy. Details opens right under the step you chose instead of at the bottom of the page.",
+    "Item cards switch at once when you move to another item and disappear as soon as the mouse leaves one. A card that would cover other items no longer gets in the way of hovering them.",
+    "Buy order: an upgrade reads \"Tier 2 upgrade of Sprint Boots\" on one line, and each step's reason has the whole width of its row. Only solid picks are labelled in the list, and items that used to read alike now say what sets them apart (\"Infernus's 2nd most bought item now\")."] },
   { v: "v3.9", date: "October 21, 2026", items: [
     "Each buy-order step now says how sure the tool is: \"Solid pick\" when it's clearly ahead of the next option, or \"Close call\" when the two are about as good and your read of the match should decide. Hover the label to see the runner-up.",
     "Checked on real matches: players who followed a solid pick won about 2% more often than those who chose its runner-up; for close calls it made no difference.",
@@ -3003,6 +3025,8 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
     s.popShareHero = (s.pop || 0) / maxPop; s.popShareBuild = bw ? buildShare(s.item.id) : null;
     s.popShare = Math.max(s.popShareHero, s.popShareBuild || 0); s.popPrior = popPrior; s.rarePenalty = rarityPenalty(s.popShare);
   }
+  // Rank among your hero's purchases now (v3.9.1, for the short reasons: "2nd most bought", so three popular items don't read alike).
+  [...merged].sort((a, b) => (b.pop || 0) - (a.pop || 0)).forEach((s, i) => { s.popRank = i + 1; });
   /* Which stage-value columns each stage reads: laning 0-9 min, mid game 9-20, late game 20-30 or 30+ minutes. The two
      late columns are blended over 90 s either side of 30:00 (v2.8.6), like the stages at 9:00 and 20:00: up to v2.8.5 the
      value switched in one second, so in a recorded Seven match Infuser fell from +2.2 to -0.5 points at 30:00 and the part
@@ -6042,9 +6066,11 @@ function itemRole(it) {
   if (r.length) return r.join(", ");
   return { weapon: "more gun damage", spirit: "more spirit damage", vitality: "survivability" }[it.item_slot_type] || "";
 }
+function ordinal(n) { return n + ({ 1: "st", 2: "nd", 3: "rd" }[n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] || "th"); }
 function shortReason(s, kind, why, opts = {}) {
   if (why) return why;
-  const fitText = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z).sort((a, b) => b.lift - a.lift).slice(0, 2)
+  // Not an item the step sells first (v3.9.1: "Sell Arcane Surge first · Works well with your Arcane Surge" in a Seven match).
+  const fitText = (s.fits || []).filter(f => f.lift > 0 && f.z >= WEAK_Z && f.anchorId !== opts.without).sort((a, b) => b.lift - a.lift).slice(0, 2)
     .map(f => `${itemName(f.anchorId)} (${pts(f.lift)}%)`);
   if (kind === "build") return fitText.length ? `Works well with your ${fitText.join(", ")}` : "Fits your build";
   // Timing belongs to "Why now" in the details (v3.2.1: it made "Why this item" repeat it); the list rows keep it.
@@ -6053,6 +6079,16 @@ function shortReason(s, kind, why, opts = {}) {
     // v3.3: plain words, the number in brackets (what it means is said under the explanations).
     if (s.adj >= 0.004) return `${heroName(S.me)} players win more with it now (${pts(s.adj)}%)`;
     if (opts.timing === false || !s.base) return `A usual ${heroName(S.me)} buy at this stage${itemRole(s.item) ? ": " + itemRole(s.item) : ""}`;
+    /* v3.9.1: what sets it apart, from its own score (Moppy's October 22 feedback: steps 2 to 4 often all read "A usual buy, around
+       minute ..."). The biggest thing in its favour after its stage value: against this team, with your items, or how many of your
+       hero's players buy it. The generic line is the last resort. */
+    const vsTop = (s.vs || []).filter(v => v.lift > 0 && v.z >= WEAK_Z).sort((a, b) => b.lift - a.lift)[0];
+    if ((s.score || 0) >= 0.002 && vsTop) return `Does well against ${heroName(vsTop.enemyId)} (${pts(vsTop.lift)}%)`;
+    if (fitText.length && (s.fitScore || 0) > 0) return `Works with your ${fitText[0]}`;
+    if ((s.catFit || 0) >= 0.002 && s.catInfo?.anchors?.length) return `Players with your ${itemName(s.catInfo.anchors[0])} do well with it`;
+    // popShare is against the most bought item, not a share of players; the rank tells popular items apart (v3.9.1).
+    if ((s.popShareHero || 0) >= 0.5) return s.popRank ? `${heroName(S.me)}'s ${s.popRank > 1 ? ordinal(s.popRank) + " " : ""}most bought item now` : `One of the most bought ${heroName(S.me)} items now`;
+    if (s.adj > 0.001) return `${heroName(S.me)} players do a little better with it now (${pts(s.adj)}%)`;
     return `A usual buy, around minute ${Math.round(s.base.avg_buy_time_s / 60)}`;
   }
   // What it counters and how directly (v3.2): "Direct counter: answers ...", "General defence", or what the statistics say.
@@ -6147,6 +6183,12 @@ function confBadge(entry, short = false) {
   b.textContent = short ? (entry.conf.label === "solid" ? "Solid pick" : "Close call") : t.short;   // in list rows the runner-up is in the title
   return b;
 }
+/* A buy-order step's reason line text (v3.9.1): an upgrade as one phrase, otherwise the usual short reason. */
+function stepReason(entry) {
+  const { s, kind, why } = entry;
+  if (entry.upgrade && /^Upgrade /.test(why || "")) return `Tier ${s.item.item_tier} upgrade of ${itemName(entry.upgrade.from)}`;
+  return shortReason(s, kind, why, { without: entry.sell && !entry.sell.later ? entry.sell.item?.id : undefined });
+}
 function stepMarks(entry) {
   const out = [];
   if (entry.sell) { const m = document.createElement("span"); m.className = "tag-sell"; m.textContent = `${entry.sell.later ? "If slots are still full: sell" : "Sell"} ${entry.sell.item?.name || "an item"} first (+${entry.sell.refund.toLocaleString()}) · `; out.push(m); }
@@ -6154,7 +6196,11 @@ function stepMarks(entry) {
   // How this step fits an upgrade path, at a glance.
   // An upgrade shows its tier (v3.0.1): its price is only the difference you pay (800 for most Tier 2 upgrades), so without it a
   // Tier 2 upgrade looked like a Tier 1 item (Moppy's Deadman Danny match, October 15).
-  const pathMark = entry.upgrade ? `Upgrade to Tier ${entry.s.item.item_tier} · ` : entry.path?.kind === "direct" ? "Outright · " : entry.why?.startsWith("Builds into") ? "Part first · " : "";
+  // v3.9.1: an upgrade is said once, "Tier 2 upgrade of Sprint Boots" (the difference you pay is in the price column); up to v3.9 the
+  // mark and the reason both said it ("Upgrade to Tier 2 · Upgrade Sprint Boots (800 more)") and the line was cut off (Moppy, October 22).
+  const upSaid = entry.upgrade && /^Upgrade /.test(entry.why || "");   // the reason line says it (stepReason)
+  const pathMark0 = entry.upgrade ? `Upgrade to Tier ${entry.s.item.item_tier} · ` : entry.path?.kind === "direct" ? "Outright · " : entry.why?.startsWith("Builds into") ? "Part first · " : "";
+  const pathMark = upSaid ? "" : pathMark0;
   if (pathMark) { const m = document.createElement("span"); m.className = "tag-path"; m.textContent = pathMark; m.title = entry.pathText || entry.plan || ""; out.push(m); }
   const ch = changeNote(entry.s.item.id);
   if (ch) { const m = document.createElement("span"); m.className = "tag-ex"; m.textContent = ch.short + " · "; m.title = ch.long; out.push(m); }
@@ -6169,30 +6215,34 @@ function changeNote(id) {
     : { short: "Changed", long: `Changed in a recent game update (price or stats, first seen ${when}). Statistics from before the change may not fit it; "Since the latest patch" uses only games after it.` };
 }
 function rowEl(entry, souls, n) {
-  const { s, kind, why } = entry;
+  const { s } = entry;
   const it = s.item;
   const el = document.createElement("div"); el.className = "row " + it.item_slot_type; el.dataset.tip = it.id;
   const ord = document.createElement("span"); ord.className = "ord"; ord.textContent = n ?? "";
   const mid = document.createElement("span"); mid.style.minWidth = "0";
   const nm = document.createElement("span"); nm.className = "name"; nm.textContent = it.name;
   if (entry.movedUp) { const m = document.createElement("span"); m.className = "moved"; m.textContent = "  new"; nm.append(m); }
-  const rs = document.createElement("span"); rs.className = "reason"; rs.append(...stepMarks(entry), shortReason(s, kind, why));
-  const cb = confBadge(entry, true); if (cb) { cb.classList.add("lead"); rs.prepend(cb); }   // v3.9: on the reason line, so rows keep their height
-  mid.append(nm, rs);
-  el.append(ord, img(itemIcon(it)), mid, costCell(s, souls, entry.cumulative ?? s.cost), buyButton(it, s.cost), skipButton(it, entry));
+  const rs = document.createElement("span"); rs.className = "reason"; rs.append(...stepMarks(entry), stepReason(entry));
+  // v3.9: on the reason line, so rows keep their height. v3.9.1: in the list only a solid pick is marked: four in five steps are close
+  // calls, and the label on each crowded out its reason (Moppy, October 22). The next buy and the details still say both.
+  const cb = entry.conf?.label === "solid" ? confBadge(entry, true) : null; if (cb) { cb.classList.add("lead"); rs.prepend(cb); }
+  mid.append(nm);
+  const cost = costCell(s, souls, entry.cumulative ?? s.cost), sub = document.createElement("span"); sub.className = "row-sub";
+  sub.append(rs, cost.lastChild);   // "Need 1,600" or "Can buy" at the end of the reason line (v3.9.1)
+  el.append(ord, img(itemIcon(it)), mid, cost, buyButton(it, s.cost), skipButton(it, entry), sub);
   selectable(el, entry);
   return el;
 }
 
 function nextCard(entry, souls) {
-  const { s, kind, why } = entry;
+  const { s } = entry;
   const it = s.item;
   const el = document.createElement("div"); el.className = "next " + it.item_slot_type; el.dataset.tip = it.id;
   const mid = document.createElement("div"); mid.style.minWidth = "0";
   const eb = document.createElement("div"); eb.className = "eyebrow"; eb.textContent = "Buy next";
   const nm = document.createElement("div"); nm.className = "name"; nm.textContent = it.name;
   const cb = confBadge(entry, true); if (cb) eb.append(cb);   // v3.9: beside "Buy next", outside the name; the runner-up is in its title and under What you'd give up
-  const rs = document.createElement("div"); rs.className = "reason"; rs.append(...stepMarks(entry), shortReason(s, kind, why));
+  const rs = document.createElement("div"); rs.className = "reason"; rs.append(...stepMarks(entry), stepReason(entry));
   mid.append(eb, nm, rs);
   if (entry.plan) { const pl = document.createElement("div"); pl.className = "plan"; pl.textContent = entry.plan; mid.append(pl); }
   const right = costCell(s, souls, entry.cumulative ?? s.cost);
@@ -6459,11 +6509,19 @@ function renderMatchView() {
   const fill = document.createElement("span"); fill.style.width = `${Math.round(100 * Math.min(1, souls / Math.max(1, total)))}%`; bar.append(fill);
   const acts = document.createElement("div"); acts.className = "mv-actions";
   const bought = buyButton(it, next.s.cost, `✓ Bought ${it.name}`); bought.classList.add("main");
-  const det = document.createElement("button"); det.type = "button"; det.className = "btn"; det.id = "mvDetails";
-  const open = !$("mvDetail").hidden;
-  det.textContent = open ? "Hide details" : "Details"; det.setAttribute("aria-expanded", String(open));
-  det.onclick = () => { $("mvDetail").hidden = !$("mvDetail").hidden; renderMatchView(); };
-  acts.append(bought, det, skipButton(it, next));
+  /* Details for any of the four steps (v3.9.1, Moppy's October 22 feedback): the full explanation opens right under that step,
+     instead of only for the next buy and at the bottom of the panel. One open at a time; it closes if the step leaves the list. */
+  const md = $("mvDetail"); $("mvThenWrap").after(md);   // back home before the steps are redrawn
+  if (S.mvDetailFor != null && !order.slice(0, 4).some(st => st.s.item.id === S.mvDetailFor)) S.mvDetailFor = null;
+  const detBtn = (id, extra = {}) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn mv-det"; if (extra.id) b.id = extra.id;
+    const open = S.mvDetailFor === id;
+    b.textContent = open ? (extra.long ? "Hide details" : "Hide") : "Details"; b.setAttribute("aria-expanded", String(open));
+    b.title = open ? "Hide the full explanation" : "Show the full explanation for this item";
+    b.onclick = e => { e.stopPropagation(); S.mvDetailFor = S.mvDetailFor === id ? null : id; renderMatchView(); };
+    return b;
+  };
+  acts.append(bought, detBtn(it.id, { id: "mvDetails", long: true }), skipButton(it, next));
   nx.append(img(itemIcon(it)), mid, bar, acts);
   // Why, now, give up: one line each.
   const tp = threeParts(next, souls);
@@ -6476,13 +6534,22 @@ function renderMatchView() {
     li.prepend(img(itemIcon(st.s.item)));   // v3.1.1: each step with its item's picture, like the next buy above
     li.querySelector(".nm").textContent = st.s.item.name;
     li.querySelector(".c").textContent = `${st.s.cost.toLocaleString()}` + (tot > souls ? ` · ${(tot - souls).toLocaleString()} more` : "");
-    li.append(skipButton(st.s.item, st));   // v3.1.2: every step can be skipped, not only the next buy (Moppy)
+    // v3.1.2: every step can be skipped; v3.9.1: every step can be marked bought and opened in detail too (Moppy, October 22).
+    const la = document.createElement("span"); la.className = "mv-acts";
+    la.append(buyButton(st.s.item, st.s.cost), detBtn(st.s.item.id), skipButton(st.s.item, st));
+    li.append(la);
     if (st.upgrade) { const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = `Upgrade to Tier ${st.s.item.item_tier}`; li.append(sub); }
     if (st.sell) { const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = `${st.sell.later ? "If slots are still full: sell" : "Sell"} ${st.sell.item?.name || "an item"}`; li.append(sub); }
     then.append(li);
   }
   $("mvThenWrap").hidden = order.length < 2;
-  if (!$("mvDetail").hidden) renderDetail(next, souls, S.view.label, $("mvDetail"));
+  const sel = order.slice(0, 4).find(st => st.s.item.id === S.mvDetailFor);
+  md.hidden = !sel;
+  if (sel) {
+    if (sel === next) $("mvWhy").after(md);   // the next buy's details: under its card and its three lines
+    else then.querySelector(`li[data-tip="${sel.s.item.id}"]`)?.append(md);
+    renderDetail(sel, souls, S.view.label, md);
+  }
 }
 /* ---------- Item cards (v3.1) ----------
    The game-style card (itemCardModel) as a tooltip: hover an item with the mouse for a moment (or reach it with the keyboard)
@@ -6528,16 +6595,27 @@ function itemCardEl(it, hint = "") {
    and a different item can take that spot under a still mouse: the card keeps showing the first item until the mouse leaves the
    spot (or the card). Up to v3.1 it followed whatever was drawn there, so it could switch from Mystic Burst to Monster Rounds while
    being read (Moppy, October 16). TIP.open: { id, rect } of the card showing; TIP.for: the element linked to it, when still there. */
-const TIP = { for: null, open: null, pending: null, show: 0, hide: 0, x: -1, y: -1, quiet: false };
+const TIP = { for: null, open: null, pending: null, show: 0, hide: 0, x: -1, y: -1, quiet: false, warm: 0 };
+const TIP_WARM_MS = 500;   // v3.9.1: just after a card went (the mouse left its item), the next item's card shows at once
 const TIP_DELAY_MS = 300;
 const inTipArea = (x, y) => { const r = TIP.open?.rect; return !!r && x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3; };
+/* The gap between the item and its card (v3.9.1): moving the mouse across it to read a long card keeps the card. Only the strip
+   between the two, the width or height they share, so the mouse passing over other items still switches or closes the card. */
+const inTipBridge = (x, y) => {
+  const r = TIP.open?.rect, c = TIP.open?.card; if (!r || !c) return false;
+  const gx = c.left >= r.right ? [r.right, c.left] : c.right <= r.left ? [c.right, r.left] : null;
+  const gy = c.top >= r.bottom ? [r.bottom, c.top] : c.bottom <= r.top ? [c.bottom, r.top] : null;
+  if (gx) return x >= gx[0] - 1 && x <= gx[1] + 1 && y >= Math.max(r.top, c.top) && y <= Math.min(r.bottom, c.bottom);
+  if (gy) return y >= gy[0] - 1 && y <= gy[1] + 1 && x >= Math.max(r.left, c.left) && x <= Math.min(r.right, c.right);
+  return false;
+};
 const tipShowing = () => !!TIP.open && !document.getElementById("itemTip")?.hidden;
 function tipBox() {
   let e = document.getElementById("itemTip");
   if (!e) {
     e = document.createElement("div"); e.id = "itemTip"; e.setAttribute("role", "tooltip"); e.hidden = true; document.body.append(e);
     e.addEventListener("pointerenter", () => clearTimeout(TIP.hide));
-    e.addEventListener("pointerleave", ev => { if (!inTipArea(ev.clientX, ev.clientY)) hideTipSoon(); });
+    e.addEventListener("pointerleave", ev => { if (!inTipArea(ev.clientX, ev.clientY) && !inTipBridge(ev.clientX, ev.clientY)) hideTip(); });
   }
   return e;
 }
@@ -6561,10 +6639,15 @@ function placeTip(box, r, bounds) {
   box.style.width = ""; box.style.maxHeight = "";
   const room = B.right - B.left - 2 * g;
   if (box.offsetWidth > room) box.style.width = Math.max(220, room) + "px";
-  const w = box.offsetWidth;
+  let w = box.offsetWidth;
   let x = null, y;
+  // v3.9.1: no room beside the item at full width but enough for a slightly narrower card: beside it, narrower, rather than over
+  // the items below. (Compact mode keeps its cards inside its column, above or below: Moppy found them too far right in v3.1.1.)
+  const sideR = B.right - g - (r.right + g), sideL = r.left - g - (B.left + g);
+  if (w > Math.max(sideR, sideL) && Math.max(sideR, sideL) >= 240) { box.style.width = Math.floor(Math.max(sideR, sideL)) + "px"; w = box.offsetWidth; }
   if (r.right + g + w <= B.right - g) x = r.right + g; else if (r.left - g - w >= B.left + g) x = r.left - g - w;
-  if (x != null) { const h = box.offsetHeight; y = Math.max(g, Math.min(r.top, H - h - g)); }
+  const side = x != null;
+  if (side) { const h = box.offsetHeight; y = Math.max(g, Math.min(r.top, H - h - g)); }
   else {
     x = Math.max(B.left + g, Math.min(r.left, B.right - g - w));
     const above = r.top - 2 * g, below = H - r.bottom - 2 * g, h0 = box.offsetHeight;
@@ -6574,6 +6657,7 @@ function placeTip(box, r, bounds) {
     y = up ? r.top - g - h : r.bottom + g;
   }
   box.style.left = Math.round(x) + "px"; box.style.top = Math.round(Math.max(g, y)) + "px";
+  return side ? "side" : "stacked";
 }
 /* The room a card may use: the item's panel, and for the buy order and your build also the list panel next to them (the place to
    browse), so a card from the buy order opens beside it instead of over the next buy. Never the item details panel. */
@@ -6597,9 +6681,13 @@ function showTip(t) {
   TIP.open = { id, rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom } };
   const box = tipBox();
   box.replaceChildren(itemCardEl(it, t.dataset.tipTitle || ""));
-  box.hidden = false; placeTip(box, TIP.open.rect, tipBounds(t));
+  box.hidden = false; box.style.pointerEvents = "";
+  /* v3.9.1: a card above or below its item may cover other items: there the mouse goes through it to them (their card at once,
+     or none off an item), instead of the card staying while the mouse is on it. A card beside its item keeps that. */
+  if (placeTip(box, TIP.open.rect, tipBounds(t)) === "stacked") box.style.pointerEvents = "none";
+  const c = box.getBoundingClientRect(); TIP.open.card = { left: c.left, right: c.right, top: c.top, bottom: c.bottom };
 }
-function hideTip() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; TIP.open = null; const b = document.getElementById("itemTip"); if (b) b.hidden = true; tipRelease(); }
+function hideTip() { if (tipShowing()) TIP.warm = Date.now() + TIP_WARM_MS; clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; TIP.open = null; const b = document.getElementById("itemTip"); if (b) b.hidden = true; tipRelease(); }
 function hideTipSoon() { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; TIP.hide = setTimeout(hideTip, 150); }
 /* The board redrew: the card stays as it is. Its element is linked again if the same item is still under the pointer. */
 function refreshTip() {
@@ -6613,26 +6701,30 @@ function refreshTip() {
 function tipFor(el) {
   const t = el?.closest?.("[data-tip]"); if (!t) return null;
   const ctl = el.closest("button, a, input, select, label");
-  return ctl && ctl !== t && t.contains(ctl) ? null : t;
+  const det = el.closest(".mv-detail");   // v3.9.1: a step's details open inside it; reading them isn't hovering the step
+  return (ctl && ctl !== t && t.contains(ctl)) || (det && det !== t && t.contains(det)) ? null : t;
 }
-/* The item under the mouse wants its card: after a pause, or quicker when moving straight from one item to the next. */
+/* The item under the mouse wants its card: after a pause when no card is showing (so sweeping the mouse across the board doesn't
+   flash cards), and at once when moving from one item's card to another item, or within half a second of leaving one (v3.9.1,
+   Moppy's October 22 feedback: up to v3.9 it took 120 ms and the old card stayed meanwhile). */
 function wantTip(t) {
   if (t === TIP.for) { clearTimeout(TIP.hide); return; }
+  if (tipShowing() || Date.now() < TIP.warm) { clearTimeout(TIP.show); clearTimeout(TIP.hide); TIP.pending = null; showTip(t); return; }
   if (t === TIP.pending) return;
   clearTimeout(TIP.show); clearTimeout(TIP.hide);
   TIP.pending = t;
-  TIP.show = setTimeout(() => { TIP.pending = null; showTip(t); }, tipShowing() ? 120 : TIP_DELAY_MS);
+  TIP.show = setTimeout(() => { TIP.pending = null; showTip(t); }, TIP_DELAY_MS);
 }
 document.addEventListener("pointermove", e => {
   if (e.pointerType !== "mouse") return;
   if (TIP.quiet && (Math.abs(e.clientX - TIP.x) > 2 || Math.abs(e.clientY - TIP.y) > 2)) TIP.quiet = false;   // Escape holds until the mouse moves
   TIP.x = e.clientX; TIP.y = e.clientY;
   if (TIP.quiet || e.target.closest?.("#itemTip")) return;
-  // Still on the spot where the card opened: it stays, whatever is drawn there now.
-  if (tipShowing() && inTipArea(e.clientX, e.clientY)) { clearTimeout(TIP.hide); if (TIP.pending) { clearTimeout(TIP.show); TIP.pending = null; } return; }
-  if (tipShowing()) hideTipSoon();
+  // Still on the spot where the card opened: it stays, whatever is drawn there now. Crossing to the card: it stays too.
+  if (tipShowing() && (inTipArea(e.clientX, e.clientY) || inTipBridge(e.clientX, e.clientY))) { clearTimeout(TIP.hide); if (TIP.pending) { clearTimeout(TIP.show); TIP.pending = null; } return; }
   const t = tipFor(e.target);
-  if (t) wantTip(t);   // also catches an item redrawn under a still mouse, once it moves
+  if (t) wantTip(t);   // another item: its card at once (also catches an item redrawn under a still mouse, once it moves)
+  else if (tipShowing() || TIP.pending) hideTip();   // off the item: the card goes at once (v3.9.1; up to v3.9 after 150 ms)
 }, { passive: true });
 document.addEventListener("pointerover", e => {
   if (e.pointerType !== "mouse" || TIP.quiet) return;
@@ -6647,8 +6739,9 @@ document.addEventListener("pointerout", e => {
   if (!from) return;
   const to = e.relatedTarget;
   if (to && (from.contains(to) || to.closest?.("#itemTip"))) return;
-  if (tipShowing() && inTipArea(e.clientX, e.clientY)) return;
-  if (tipShowing() || TIP.pending === from) hideTipSoon();
+  if (tipShowing() && (inTipArea(e.clientX, e.clientY) || inTipBridge(e.clientX, e.clientY))) return;
+  if (to && tipFor(to) && tipFor(to) !== from) return;   // straight onto another item: pointerover switches the card
+  if (tipShowing() || TIP.pending === from) hideTip();
 });
 document.addEventListener("focusin", e => {
   const t = e.target.closest?.("[data-tip]");
@@ -7658,7 +7751,7 @@ $("fbCopy").onclick = async () => {
 };
 $("closePicker").onclick = () => { $("pickerOverlay").hidden = true; };
 $("pickerOverlay").onclick = e => { if (e.target === $("pickerOverlay")) $("pickerOverlay").hidden = true; };
-document.addEventListener("keydown", e => { if (e.key === "Escape" && (TIP.for || !document.getElementById("itemTip")?.hidden)) { hideTip(); TIP.quiet = true; } });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && (TIP.for || !document.getElementById("itemTip")?.hidden)) { hideTip(); TIP.quiet = true; TIP.warm = 0; } });
 document.addEventListener("keydown", e => { if (e.key === "Escape") ["pickerOverlay", "notesOverlay", "feedbackOverlay", "reviewOverlay"].forEach(id => { $(id).hidden = true; }); });
 $("toastUndo").onclick = () => (toastUndo || undoBought)();
 $("toastMore").onclick = () => { const f = toastMore; toastMore = null; $("toast").hidden = true; if (f) f(); };
