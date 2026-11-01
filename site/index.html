@@ -451,7 +451,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.9.1</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.9.2</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -744,10 +744,13 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.9.1";   // shown in the top bar and written into match records
+const VERSION = "v3.9.2";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.9.2", date: "November 1, 2026", items: [
+    "Your build direction now holds late in the match. After 20 minutes, a spirit build no longer gets a buy order of gun items (and a gun build no longer gets spirit ones) just because players who own items like yours often buy the other kind. An item outside your build still comes up when the match calls for it, such as a strong counter.",
+    "Checked on real matches: players with a committed build rarely switch kinds late, and spirit builds that switched to gun after 30 minutes won less often. The late-game advice measures better with this change."] },
   { v: "v3.9.1", date: "October 22, 2026", items: [
     "Compact mode: every step in the buy order now has Bought and Details, not just the next buy. Details opens right under the step you chose instead of at the bottom of the page.",
     "Item cards switch at once when you move to another item and disappear as soon as the mouse leaves one. A card that would cover other items no longer gets in the way of hovering them.",
@@ -1002,6 +1005,16 @@ const TAU_CAT = 0.015, CAT_FIT_W = 1, CAT_MIN_ITEM = 10;
    minutes too ("committed"): that's where your direction matters most (Moppy's gun McGinnis at 30 minutes). */
 const CAT_KINDS = ["weapon", "spirit"];
 const CAT_PHASE_W = { lane: 1, mid: 1, late: 0, committed: 1 };
+/* v3.9.2: after 20 minutes a committed build's fit by kind only pulls toward that build: for the other kind it can lower an item's
+   value but never raise it. In Moppy's spirit McGinnis matches of October 30 and 31 it raised every gun item by about 1 point from
+   20:00 ("players who own Boundless Spirit and Superior Duration do better with gun items"), and after 30:00 the buy order was all
+   gun. That's the confusion noted above (owning big items late mostly means being ahead), and players don't do it: on the backtest,
+   McGinnis players with a spirit build bought a gun item next 5 to 7% of the time after 20 minutes, while the tool's first step was
+   one 25 to 27% of the time; over all heroes, spirit builds switching to gun after 30 minutes won 4.4 ± 1.6 points less often than
+   the situation predicted. With this rule and without the "kind" reason (offBuildReason): advice edge top 4 late 1.35 -> 1.66
+   points (matched by hero 0.93 -> 1.08), first step 1.81 -> 1.91, lane and mid unchanged within noise; McGinnis spirit builds'
+   first step of the other kind after 20 minutes 1 to 2%, gun builds' 3 to 13% (players 13 to 32%). */
+const CAT_TOWARD_BUILD = { on: true };
 /* How many survival items you already have (v3.4, see survivalPenalty). Measured on the backtest matches (75,000 players, about
    1.1 million purchases, every hero, October 2026): a survival purchase compared with a gun or spirit purchase by players of the
    same hero, at the same stage and net worth, with the same share of souls already in survival items (relative to the hero's
@@ -1690,6 +1703,11 @@ function enemyShifts(base, perEnemy) {
     return { enemyId, idx, shift: weightedMedian(diffs) };
   });
 }
+/* The fit by kind as it counts at this stage (v3.4, v3.9.2): committed is false or your build's other kind ("weapon" or "spirit"). */
+function catFitWeighted(score, kind, phase, committed) {
+  if (!(committed && phase === "late")) return score * (CAT_PHASE_W[phase] ?? 1);
+  return (CAT_TOWARD_BUILD.on && kind === committed ? Math.min(0, score) : score) * CAT_PHASE_W.committed;
+}
 function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, laneIds, phase, fit = {}, cat = {}, committed = false, threat = new Map(), covered = new Map(), laneRows = null }) {
   const base = new Map(baseline.map(r => [r.item_id, r]));
   const enemies = enemyShifts(base, perEnemy);
@@ -1748,7 +1766,7 @@ function scoreItems({ baseline, perEnemy, items, owned, souls, itemByClass, lane
     const cost = effectiveCost(it, owned, itemByClass);
     // Build fit by kind (v3.4): how this item's whole kind does for players who own your items.
     const cf = catFitFor(cat, it.item_slot_type, owned);
-    out.push({ item: it, base: b, pb, vs, score, scoreSe, bestZ: best, counterZ, fits, fitScore, fitSe: Math.sqrt(fitVar), fitZ, catFit: cf ? cf.score * (committed && phase === "late" ? CAT_PHASE_W.committed : (CAT_PHASE_W[phase] ?? 1)) : 0, catZ: cf ? cf.z : 0, catInfo: cf, cost, affordable: cost <= souls, pop: b.players });
+    out.push({ item: it, base: b, pb, vs, score, scoreSe, bestZ: best, counterZ, fits, fitScore, fitSe: Math.sqrt(fitVar), fitZ, catFit: cf ? catFitWeighted(cf.score, it.item_slot_type, phase, committed) : 0, catZ: cf ? cf.z : 0, catInfo: cf, cost, affordable: cost <= souls, pop: b.players });
   }
   return out;
 }
@@ -1968,12 +1986,15 @@ function valueSe(s) {
 const CONF = { solid: 1.3 };
 function confLabel(z) { return z >= CONF.solid ? "solid" : "close"; }
 /* A reason in this match for a big item outside a committed build (v3.4, see BUILD_ID): a convincing counter, a convincing fit with
-   your items (one item, or its whole kind), or what the live match needs. Returns its name, or null. */
+   one of your items, or what the live match needs. Returns its name, or null. v3.9.2: a whole kind doing well with your items
+   ("kind") no longer counts: it's a general statistic, not something in this match, and late it mostly reflects being ahead
+   (CAT_TOWARD_BUILD). In Moppy's spirit McGinnis matches it was the reason for every gun step after 30:00. */
+const OFF_BUILD_KIND = { on: false };
 function offBuildReason(s) {
   if (((s.counterZ || 0) >= STRONG_Z || (s.bestZ || 0) >= SINGLE_Z) && (s.score || 0) > 0) return "counter";
   if ((s.mechScore || 0) > 0.005) return "needs";
   if ((s.fitZ || 0) >= STRONG_Z && (s.fitScore || 0) > 0) return "fit";
-  if ((s.catZ || 0) >= WEAK_Z && (s.catFit || 0) > 0.002) return "kind";
+  if (OFF_BUILD_KIND.on && (s.catZ || 0) >= WEAK_Z && (s.catFit || 0) > 0.002) return "kind";
   return null;
 }
 /* A second item for a job you've already covered (see overlapOf) needs a reason in this match (v3.5): a convincing counter, or what
@@ -3010,7 +3031,7 @@ function computePlan({ ready, items, itemById, itemByClass, prog, owned, souls, 
   const lists = ready.map(p => {
     const e = p.entry;
     return { w: p.w / wsum, scored: scoreItems({ baseline: e.baseline, perEnemy: e.ready ? e.perEnemy : [], items, owned, souls,
-      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, cat: CAT_FIT_W ? e.catFit || {} : {}, committed: !!identity.off, threat: threatW, covered, laneRows: p.laneRows || null }) };
+      itemByClass, laneIds: lane, phase: p.phase, fit: e.fitMap || {}, cat: CAT_FIT_W ? e.catFit || {} : {}, committed: identity.off || false, threat: threatW, covered, laneRows: p.laneRows || null }) };
   });
   const merged = mergeScored(lists);
   // Stage value without the wealth bias, and timing (flow data; optional).
