@@ -132,6 +132,10 @@
   @media (prefers-reduced-motion: reduce) { .pill[data-state="busy"] .pdot { animation: none; } }
   .src-tag { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
   .src-tag.live { color: var(--good); border-color: var(--good); }
+  /* v3.9.3: next to the match clock: "paused", or how far you've moved it from the broadcast's time (click to undo). */
+  button.src-tag { background: none; font-family: inherit; line-height: 1.5; cursor: pointer; }
+  button.src-tag:disabled { cursor: default; }
+  .src-tag.paused { color: var(--warn, #b26b00); border-color: currentColor; }
 
   /* Setup: two clearly separate ways in, side by side on wide screens */
   #setup { display: grid; gap: 12px; align-items: start; }
@@ -441,7 +445,7 @@
       <span id="soulsSrc" class="src-tag" hidden></span>
     </span>
     <span class="group-inline" id="clockGroup" aria-label="Match clock">
-      <button id="clockTime" type="button" class="clockbtn" title="Match clock. Click to type the time.">--:--</button><input id="clockInput" type="text" inputmode="numeric" placeholder="m:ss" aria-label="Match time, minutes and seconds" size="5" hidden>
+      <button id="clockTime" type="button" class="clockbtn" title="Match clock. Click to type the time.">--:--</button><input id="clockInput" type="text" inputmode="numeric" placeholder="m:ss" aria-label="Match time, minutes and seconds" size="5" hidden><button id="clockNote" class="src-tag" type="button" hidden></button>
       <span id="stageTag"></span>
       <button id="clockStart" class="btn tiny" type="button" title="Start the match clock now (use it at 0:00 in game)">Start clock</button>
       <button id="clockMinus" class="btn tiny" type="button" title="The clock is ahead of your game: move it back 1 minute" hidden>−1 min</button>
@@ -451,7 +455,7 @@
     <button id="viewToggle" class="btn" type="button" hidden aria-pressed="false" title="Compact mode: just the next buy and what matters now, in large type. Full view: everything.">Compact mode</button>
     <button id="editSetup" class="btn" type="button" hidden title="Back to the start screen to change your hero, the enemies, your lane or the live match link. The match keeps going; nothing is lost.">Match setup</button>
     <button id="clearAll" class="btn" type="button" title="Start over for a new match: clears heroes, items and the live link (keeps your Steam account)">New match</button>
-    <span class="muted small" title="Tool version" id="toolVersion">v3.9.2</span>
+    <span class="muted small" title="Tool version" id="toolVersion">v3.9.3</span>
     <span class="small updnote" id="updNote" hidden></span>
     <!-- v3.1: the occasional things in one menu, so the bar keeps to what you use during a match. -->
     <details id="moreMenu" class="more">
@@ -744,10 +748,14 @@
 <script>
 /* ---------- Settings ---------- */
 const API = "https://api.deadlock-api.com";
-const VERSION = "v3.9.2";   // shown in the top bar and written into match records
+const VERSION = "v3.9.3";   // shown in the top bar and written into match records
 /* Patch notes shown under "What's new": short, plain, about what players notice. Add an entry for each release
    (newest first); a test checks that the current version has one. CHANGELOG.md keeps the longer notes. */
 const PATCH_NOTES = [
+  { v: "v3.9.3", date: "November 19, 2026", items: [
+    "One clock: the Live pill no longer shows a time of its own, so it can't disagree with the match clock. When you move the clock with ±1 min or type a time, a tag next to it says by how much; click the tag to go back to the broadcast's time.",
+    "Paused matches: the tool reads the game's pause, so the clock stands still while the match is paused (the tag says \"paused\") and carries on without jumping when it resumes. A paused match is no longer mistaken for one that has ended.",
+    "Souls in a linked match come from the broadcast, so moving the clock doesn't change them. The souls tag now says so."] },
   { v: "v3.9.2", date: "November 1, 2026", items: [
     "Your build direction now holds late in the match. After 20 minutes, a spirit build no longer gets a buy order of gun items (and a gun build no longer gets spirit ones) just because players who own items like yours often buy the other kind. An item outside your build still comes up when the match calls for it, such as a strong counter.",
     "Checked on real matches: players with a committed build rarely switch kinds late, and spirit builds that switched to gun after 30 minutes won less often. The late-game advice measures better with this change."] },
@@ -4166,7 +4174,16 @@ function tickClock() {
   ["clockMinus", "clockPlus"].forEach(id => $(id).hidden = !on);
   $("clockStop").hidden = !on || S.clockSynced;
   $("clockStart").hidden = on;
-  $("clockTime").title = S.clockSynced ? `Match clock, following the live broadcast${S.clockAdjust ? ` (moved ${S.clockAdjust > 0 ? "+" : "−"}${Math.abs(S.clockAdjust / 60)} min by you)` : ""}. The broadcast runs 1 to 2 minutes behind your game; use +1 min to line it up.` : S.clockEstimated ? "Estimated from your net worth until the live match's own clock arrives (usually within a minute)." : "Match clock";
+  const adj = Math.round(S.clockAdjust || 0), adjAbs = Math.abs(adj);
+  const adjText = (adj > 0 ? "+" : "−") + (adjAbs % 60 === 0 ? `${adjAbs / 60} min` : mmss(adjAbs));   // "+1 min", or "+9:49" after a typed time
+  $("clockTime").title = S.clockSynced ? `Match clock: the live broadcast's time${adj ? `, moved ${adjText} by you` : ""}. The broadcast runs 1 to 2 minutes behind your game; use +1 min to line it up. It stands still while the match is paused. Click to type the time.` : S.clockEstimated ? "Estimated from your net worth until the live match's own clock arrives (usually within a minute)." : "Match clock. Click to type the time.";
+  // v3.9.3: one clock. Its tag says when it isn't simply the broadcast's time: paused, or moved by you (click to undo).
+  const note = $("clockNote"), paused = S.clockSynced && gamePaused();
+  note.hidden = !(paused || (S.clockSynced && adj));
+  note.textContent = paused ? "paused" : adjText;
+  note.className = "src-tag" + (paused ? " paused" : "");
+  note.disabled = paused;
+  note.title = paused ? "The match is paused (the game says so). The clock waits and goes on when the match does." : `You moved the clock ${adjText} from the broadcast's time. Click to go back to the broadcast's time.`;
   $("phase").querySelectorAll("button").forEach(b => b.disabled = !!S.clockSynced);
   $("phaseNote").textContent = S.clockSynced ? "The stage follows the live match clock." : "The match clock starts when you press Get recommendations (at the stage picked here). The stage then follows the clock, blending gradually around 9 and 20 minutes. Picking a stage by hand stops the clock.";
   const sec = clockSeconds();
@@ -4243,7 +4260,8 @@ function updateSouls(force) {
   if (b) {
     tagEl.textContent = { live: "live", livenw: "from net worth", clock: "estimate", ended: "final" }[b.src];
     tagEl.className = "src-tag" + (b.src === "live" ? " live" : "");
-    tagEl.title = { live: "Your souls, read from the live match (1 to 2 minutes behind).", livenw: "Worked out from your live net worth minus your items.", clock: "Estimated from the match clock. Type your in-game number to correct it.", ended: "The match has ended: your souls when it ended." }[b.src];
+    tagEl.title = { live: "Your souls, read from the live match (1 to 2 minutes behind).", livenw: "Worked out from your live net worth minus your items.", clock: "Estimated from the match clock. Type your in-game number to correct it.", ended: "The match has ended: your souls when it ended." }[b.src]
+      + ((b.src === "live" || b.src === "livenw") ? " Moving the match clock doesn't change them: they're the broadcast's." : b.src === "clock" ? " Moving the clock moves the estimate." : "");
   }
   if (!b) { hint.textContent = S.clockStart == null ? "Start the match clock or link the match, and souls fill in by themselves." : S.me ? "Loading soul estimates…" : "Pick your hero to estimate souls."; S.soulSrc = null; return; }
   if (b.src !== S.soulSrc) {
@@ -4259,7 +4277,7 @@ function updateSouls(force) {
   if (document.activeElement !== $("souls")) $("souls").value = v;
   const off = Math.round(S.soulOffset / 100) * 100;
   hint.textContent = b.src === "ended" ? "The match has ended: these are your souls when it ended."
-    : b.src === "live" ? "Souls come from the live match, about 1 to 2 minutes behind. Items you mark bought count right away."
+    : b.src === "live" ? "Souls come from the live match, about 1 to 2 minutes behind. Items you mark bought count right away." + (S.clockAdjust ? " Moving the clock doesn't change them." : "")
     : b.src === "livenw" ? (LIVE.itemsOk ? "Souls come from your live net worth minus the items the match shows you own." : "Souls come from your live net worth minus items you've marked bought.") + (off ? " Corrected by what you typed." : "")
     : "Souls are estimated from the clock. Type your in-game number to correct it." +
       (off ? ` You're about ${Math.abs(off).toLocaleString()} ${off < 0 ? "behind" : "ahead of"} the average ${S.heroById[S.me].name}.` : "");
@@ -4356,6 +4374,7 @@ function renderLive() {
   else if (rs?.state === "error") setStep("stepUpdates", "error", rs.text);
   else if (!L.applied && !L.lastRowAt) setStep("stepUpdates", "idle", "Starts once the match data is in.");
   else if (rs?.state === "warn") setStep("stepUpdates", "warn", rs.text);
+  else if (gamePaused()) setStep("stepUpdates", "ok", `The match is paused (the game says so). The clock waits at ${mmss(broadcastGameTime() ?? 0)} until it goes on.`);
   else if (!fresh) setStep("stepUpdates", "warn", `No new data for ${Math.round((now - (L.lastRowAt || now)) / 1000)} s. Still connected and waiting.`);
   else {
     const bt = broadcastGameTime();
@@ -4371,7 +4390,10 @@ function renderLive() {
     const states = ["stepData", "stepUpdates"].map(id => $(id).dataset.state);
     if (states.includes("error")) { st = "error"; txt = "Live problem"; }
     else if (rs?.state === "ended") { st = "idle"; txt = "Match over"; }
-    else if (states[1] === "ok" || (states[1] === "warn" && fresh)) { st = states[1] === "ok" ? "ok" : "warn"; const bt = broadcastGameTime(); txt = "Live" + (bt ? " · " + mmss(bt) : "") + (L.itemsOk ? "" : " · items by hand"); }
+    // v3.9.3: no time here: the match clock is the one time to go by (up to v3.9.2 the pill showed the broadcast's, which
+    // differed from the clock by your ±1 min; Moppy, October 21).
+    else if (gamePaused()) { st = "ok"; txt = "Live · paused"; }
+    else if (states[1] === "ok" || (states[1] === "warn" && fresh)) { st = states[1] === "ok" ? "ok" : "warn"; txt = "Live" + (L.itemsOk ? "" : " · items by hand"); }
     else if (states[1] === "warn") { st = "warn"; txt = "Live: waiting for data"; }
     else if (L.applied && !L.url) { st = "warn"; txt = "Teams only (no live data)"; }
     else { st = "busy"; txt = "Connecting…"; }
@@ -4439,6 +4461,11 @@ function findLiveColumns(tables) {
     rulesTable: rules?.name || null,
     rulesStart: pick(rules, /m_flGameStartTime$/i),
     rulesPaused: pick(rules, /m_nTotalPausedTicks$/i),
+    // Whether the game is paused now and the tick the pause started (v3.9.3; the same fields the data service's parser reads,
+    // live-events/src/demo_parser/hashes.rs). The total above only grows once a pause is over, so without these the clock ran on
+    // through a pause and jumped back when it ended (Moppy's Rat King match, October 21: 74 s at 15:03).
+    rulesPausedNow: pick(rules, /m_bGamePaused$/i),
+    rulesPauseStart: pick(rules, /m_nPauseStartTick$/i),
     // Extra item slots each team has unlocked (Valve's CCitadelTeam.m_nFlexSlotsUnlocked, a bit mask).
     teamTable: team?.name || null,
     teamNum: pick(team, /(^|\.|__)m_iTeamNum$/i),
@@ -4451,7 +4478,7 @@ function findLiveColumns(tables) {
     // The game's death summary (v3.0, recorded only): one per death, with who and what dealt the damage.
     evDeath: evTable(/^DeathReplayDataEvent$/, ["tick", "damage_summary"]),
     evGameOverTest: !!evTable(/^GameOverEvent$/, ["tick", "winning_team", "just_a_test"]),
-    v: 10
+    v: 11
   };
 }
 function schemaSummary(tables, cols) {
@@ -4523,24 +4550,59 @@ function soulsSql(c, hero) {
 function rulesSql(c) {
   const sel = [`${qcol("tick")} AS tick`, `${qcol(c.rulesStart)} AS start`];
   if (c.rulesPaused) sel.push(`${qcol(c.rulesPaused)} AS paused`);
+  if (c.rulesPausedNow) sel.push(`${qcol(c.rulesPausedNow)} AS pausednow`);
+  if (c.rulesPauseStart) sel.push(`${qcol(c.rulesPauseStart)} AS pausestart`);
   return `SELECT ${sel.join(", ")} FROM ${qtable(c.rulesTable)}`;
 }
 /* Game time the broadcast has reached, worked out the way the API's live-events service does:
-   (tick - paused ticks) / 64 - game start time, plus the seconds since that tick arrived. */
+   (tick - paused ticks) / 64 - game start time, plus the seconds since that tick arrived. During a pause (v3.9.3) it stands
+   at the pause's start and doesn't count on. */
 const TICK_RATE = 64;
 function broadcastGameTime() {
   if (LIVE.gameStart == null || !LIVE.lastTick) return null;
-  const t = (LIVE.lastTick - (LIVE.pausedTicks || 0)) / TICK_RATE - LIVE.gameStart + (Date.now() - LIVE.lastTickAt) / 1000;
+  const P = LIVE.pause, paused = !!P?.now && P.start > 0;
+  const t = gameTimeAtTick(LIVE.lastTick, LIVE) + (paused && LIVE.lastTick >= P.start ? 0 : (Date.now() - LIVE.lastTickAt) / 1000);
   return t > 0 ? t : null;
 }
+/* Pauses (v3.9.3). The game says when it's paused and the tick the pause started; the total paused ticks it keeps may only grow
+   once a pause is over. So the tool keeps its own count as well: the total when a pause began plus that pause's length, once
+   it's over, and uses whichever is larger. The clock then stands still through a pause and carries on without a jump; a
+   broadcast that just goes quiet is not a pause (it keeps the "no new data" warning). Pure, so it can be tested on its own:
+   P is the pause state, r a game-rules row (tick, paused total, paused now, pause start). Returns the new state. */
+function pauseStep(P, r) {
+  P = { now: false, start: 0, base: 0, known: 0, total: 0, n: 0, ...(P || {}) };
+  if (r.paused != null && Number.isFinite(Number(r.paused))) P.total = Number(r.paused);
+  const flag = r.pausednow == null ? null : r.pausednow === true || r.pausednow === 1 || r.pausednow === "true";
+  const start = r.pausestart != null && Number(r.pausestart) > 0 ? Number(r.pausestart) : null;
+  if (flag === true && !P.now) { P.now = true; P.start = start ?? (r.tick != null ? Number(r.tick) : 0); P.base = Math.max(P.total, P.known); P.n++; }
+  else if (flag === true && start != null) P.start = start;
+  else if (flag === false && P.now) {
+    const end = r.tick != null ? Number(r.tick) : P.start;
+    P.known = P.base + Math.max(0, end - P.start); P.now = false;
+  }
+  return P;
+}
+/* The paused ticks to take off a tick: the game's total, or the tool's own count if that's larger (see pauseStep). */
+function pausedTicksFor(L) {
+  const P = L.pause;
+  if (P?.now) return P.base;   // during a pause: as it stood when the pause began, whatever the game's total does meanwhile
+  return Math.max(L.pausedTicks || 0, P ? P.known : 0);
+}
+/* Game time of a broadcast tick: standing at the pause's start for ticks during a pause (v3.9.3). */
+function gameTimeAtTick(tick, L) {
+  if (L.gameStart == null || tick == null) return null;
+  const P = L.pause; let tk = Number(tick);
+  if (P?.now && P.start > 0 && tk > P.start) tk = P.start;
+  return (tk - pausedTicksFor(L)) / TICK_RATE - L.gameStart;
+}
+function gamePaused() { return !!(LIVE.id && LIVE.pause?.now && LIVE.rosterState?.state !== "ended"); }
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s) % 60).padStart(2, "0")}`;
 /* How long each step of linking a match took, for match records (the time you pressed Find my match or Connect is 0). */
 function tlMark(label) { const T = LIVE.timeline; if (T && !T.some(x => x[0] === label)) T.push([label, Date.now()]); }
 /* Game time of a broadcast tick (null until the match start time is known). */
 function tickGameTime(tick) {
-  if (LIVE.gameStart == null || tick == null) return null;
-  const t = (Number(tick) - (LIVE.pausedTicks || 0)) / TICK_RATE - LIVE.gameStart;
-  return t >= 0 ? t : null;
+  const t = gameTimeAtTick(tick, LIVE);
+  return t != null && t >= 0 ? t : null;
 }
 /* Your deaths, from the live match: kept per match (S.deaths), so the Egg's stored souls pause while you're dead
    and the board says when you're respawning. respawn: the game's respawn time (server seconds), if sent. */
@@ -4597,7 +4659,7 @@ function steamProfileUrl(accountId) { return `https://steamcommunity.com/profile
 
 async function liveColumns() {
   const cached = store.get("liveCols");
-  if (cached && Date.now() - cached.at < 86400000 && cached.cols?.hero && cached.cols.v === 10) return cached.cols;
+  if (cached && Date.now() - cached.at < 86400000 && cached.cols?.hero && cached.cols.v === 11) return cached.cols;
   const sch = await getJSON("/v1/matches/demo/schema");
   const tables = sch.tables || [];
   const cols = findLiveColumns(tables);
@@ -5015,7 +5077,7 @@ function unlinkMatch(quiet) {
   for (const k in LIVE.streams) LIVE.streams[k].stop();
   Object.assign(LIVE, { streams: {}, id: null, url: null, roster: new Map(), pendingRoster: null, rosterSrc: null, firstRowAt: 0, lastRowAt: 0, applied: false, appliedSig: "",
     itemsOk: false, itemsChecked: false, idSeen: 0, idKnown: 0, idSamples: [], knownSet: null, rawItemSample: "", rawSoulsSample: "", soulsRows: 0, invSig: "", souls: null, nw: null, meHow: null,
-    thinRejected: null, laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0,
+    thinRejected: null, laneSig: "", laneApplied: "", myLane: null, lastTick: 0, lastTickAt: 0, gameStart: null, pausedTicks: 0, pause: null,
     connecting: false, urlVia: null, rosterState: null, dataErr: null, foundVia: null, msgKey: null, lobby: null, lobbyFetching: false, lobbyRetryAt: 0, teamFlex: {}, ownedSyncedOnce: false, ownLivePrev: null, streamInfo: {}, soulsUnfiltered: false, soulsHeroesSeen: null, heroTick: {}, entHero: {}, swapped: [], leftovers: [], replayedRows: 0, soulsGaveUp: false, soulsUnfilteredRows: 0, ctlOf: {}, soulsLink: null, soulsLinkFailed: null, soulsEvents: null, soulsEventsFailed: null, soulsVia: null, rawSoulsAny: null, meAlive: undefined, respawnIn: null, deathSamples: null, probe: null, gameOver: null, endHow: null, endChecks: 0, neverStarted: false, settleHeld: 0 });
   clearTimeout(LIVE.soulsCheck);
   S.matchId = null;
@@ -5113,6 +5175,14 @@ function startRulesStream() {
   LIVE.streams.rules = liveStream("rules", rulesSql(c), r => {
     if (r.start != null) LIVE.gameStart = Number(r.start);
     if (r.paused != null) LIVE.pausedTicks = Number(r.paused);
+    const was = !!LIVE.pause?.now;
+    LIVE.pause = pauseStep(LIVE.pause, r);
+    if (was !== LIVE.pause.now) {
+      const t = tickGameTime(LIVE.pause.now ? LIVE.pause.start : r.tick);
+      logEvent(LIVE.pause.now ? "paused" : "resumed", { t: t != null ? Math.round(t) : null, tick: r.tick ?? null });
+      liveStatus(LIVE.pause.now ? "The match is paused. The clock waits until it goes on." : "The match goes on. The clock follows it again.", "muted");
+      tickClock();
+    }
   });
 }
 function teamSql(c) {
@@ -5368,6 +5438,8 @@ function liveStream(name, sql, onRow, onReject) {
             const t = LIVE.lastTick || 0;
             endCheck = endCheck && t <= endCheck.tick + TICK_RATE * 5 ? { ...endCheck, n: endCheck.n + 1 } : { tick: t, n: 1 };
             LIVE.endChecks = (LIVE.endChecks || 0) + 1;
+            // A paused match sends nothing new (v3.9.3): that's not the end.
+            if (endCheck.n >= 2 && gamePaused()) return retry("The match is paused and the broadcast has nothing new to send. The tool keeps listening.", ok ? LIVE_HEALTHY.quickS : 10);
             if (endCheck.n >= 2) { stopped = true; matchEnded("probable"); return; }
             return retry("The live broadcast stopped sending data. That's usually a short hiccup on the broadcast's side, so the tool is reconnecting (no connection used up).", ok ? LIVE_HEALTHY.quickS : 10);
           }
@@ -7806,6 +7878,7 @@ function closeClockInput(commit) {
 }
 $("clockInput").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); closeClockInput(true); $("clockTime").focus(); } else if (e.key === "Escape") { e.stopPropagation(); closeClockInput(false); $("clockTime").focus(); } };
 $("clockInput").onblur = () => closeClockInput(true);
+$("clockNote").onclick = () => { if (!S.clockSynced || gamePaused()) return; S.clockAdjust = 0; saveMatch(); tickClock(); renderResults(); };
 $("clockMinus").onclick = () => { if (S.frozen?.sec != null) S.frozen.sec = Math.max(0, S.frozen.sec - 60); else if (S.clockSynced) S.clockAdjust = (S.clockAdjust || 0) - 60; else S.clockStart += 60000; saveMatch(); tickClock(); };
 $("clockPlus").onclick = () => { if (S.frozen?.sec != null) S.frozen.sec += 60; else if (S.clockSynced) S.clockAdjust = (S.clockAdjust || 0) + 60; else S.clockStart -= 60000; saveMatch(); tickClock(); };
 $("clockStop").onclick = () => { S.clockStart = null; if (S.frozen) S.frozen.sec = null; saveMatch(); tickClock(); updateSouls(true); };
